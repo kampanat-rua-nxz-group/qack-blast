@@ -20,6 +20,7 @@ func _initialize() -> void:
 	test_bomb_exit(arena)
 	test_one_press_moves_one_tile(arena)
 	test_hold_repeats_at_tile_centers(arena)
+	test_facing_tracks_actual_movement(arena)
 	test_initial_blast_range(arena)
 	test_simultaneous_blasts(arena)
 	test_pickup_after_simultaneous_blasts(arena)
@@ -150,6 +151,18 @@ func test_hold_repeats_at_tile_centers(arena) -> void:
 	for frame in range(40):
 		arena.move_player(0, 0.016)
 	check(arena.players[0].pos == start + Vector2(arena.CELL * 2, -arena.CELL), "release after turning stops at center")
+
+
+func test_facing_tracks_actual_movement(arena) -> void:
+	arena.new_round()
+	clear_crates(arena)
+	arena.players[0].pos = arena.center(Vector2i(3, 3))
+	arena.start_move(0, Vector2.RIGHT)
+	check(is_equal_approx(arena.players[0].get("facing", 0.0), -PI / 2.0), "duck faces right when moving right")
+	arena.move_targets[0] = Vector2.ZERO
+	arena.board[2][3] = arena.CRATE
+	arena.start_move(0, Vector2.UP)
+	check(is_equal_approx(arena.players[0].get("facing", 0.0), -PI / 2.0), "blocked movement does not turn the duck")
 
 
 func test_initial_blast_range(arena) -> void:
