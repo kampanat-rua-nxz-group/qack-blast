@@ -18,7 +18,8 @@ func _initialize() -> void:
 	arena.new_round()
 	test_spawn_routes(arena)
 	test_bomb_exit(arena)
-	test_turn_buffer(arena)
+	test_one_press_moves_one_tile(arena)
+	test_hold_repeats_at_tile_centers(arena)
 	test_simultaneous_blasts(arena)
 	test_pickup_after_simultaneous_blasts(arena)
 	print("Arena checks: %d failure(s)" % failures)
@@ -77,22 +78,79 @@ func test_simultaneous_blasts(arena) -> void:
 	check(not has_flame(arena, Vector2i(4, 3), 1), "second blast stops at crate destroyed in same tick")
 
 
-func test_turn_buffer(arena) -> void:
+func test_one_press_moves_one_tile(arena) -> void:
 	arena.new_round()
 	clear_crates(arena)
-	arena.players[0].pos = arena.center(Vector2i(2, 3)) + Vector2(15, 0)
-	arena.travel_direction[0] = Vector2.RIGHT
+	var start: Vector2 = arena.center(Vector2i(3, 3))
+	arena.players[0].pos = start
 	var key := InputEventKey.new()
-	key.keycode = KEY_W
+	key.keycode = KEY_D
 	key.pressed = true
 	arena._input(key)
-	var start_y: float = arena.players[0].pos.y
-	var start_x: float = arena.players[0].pos.x
+	var early_turn := InputEventKey.new()
+	early_turn.keycode = KEY_W
+	early_turn.pressed = true
+	arena._input(early_turn)
+	early_turn.pressed = false
+	arena._input(early_turn)
+	key.pressed = false
+	arena._input(key)
 	arena.move_player(0, 0.016)
-	check(arena.players[0].pos.x > start_x and arena.players[0].pos.y == start_y, "early turn keeps moving toward junction")
-	for frame in range(14):
+	check(arena.players[0].pos.x > start.x and arena.players[0].pos.y == start.y, "movement stays on the tile centerline")
+	for frame in range(40):
 		arena.move_player(0, 0.016)
-	check(arena.players[0].pos.x > start_x + 10.0 and arena.players[0].pos.y < start_y, "early turn input executes at next open junction")
+	check(arena.players[0].pos == start + Vector2(arena.CELL, 0), "one press finishes at the next tile center")
+	for frame in range(40):
+		arena.move_player(0, 0.016)
+	check(arena.players[0].pos == start + Vector2(arena.CELL, 0), "one press never starts a second tile")
+	key.pressed = false
+	arena._input(key)
+	key.pressed = true
+	arena._input(key)
+	key.pressed = false
+	arena._input(key)
+	for frame in range(40):
+		arena.move_player(0, 0.016)
+	check(arena.players[0].pos == start + Vector2(arena.CELL * 2, 0), "another press moves exactly one more tile")
+	arena.board[3][6] = arena.CRATE
+	key.pressed = true
+	arena._input(key)
+	for frame in range(40):
+		arena.move_player(0, 0.016)
+	check(arena.players[0].pos == start + Vector2(arena.CELL * 2, 0), "blocked press leaves player at tile center")
+
+
+func test_hold_repeats_at_tile_centers(arena) -> void:
+	arena.new_round()
+	clear_crates(arena)
+	var start: Vector2 = arena.center(Vector2i(3, 3))
+	arena.players[0].pos = start
+	var right := InputEventKey.new()
+	right.keycode = KEY_D
+	right.pressed = true
+	arena._input(right)
+	for frame in range(20):
+		arena.move_player(0, 0.016)
+	check(arena.players[0].pos.x > start.x + arena.CELL, "holding starts another tile after reaching center")
+	var up := InputEventKey.new()
+	up.keycode = KEY_W
+	up.pressed = true
+	arena._input(up)
+	right.pressed = false
+	arena._input(right)
+	for frame in range(10):
+		arena.move_player(0, 0.016)
+	check(arena.players[0].pos.y == start.y, "new direction does not turn before tile center")
+	for frame in range(10):
+		arena.move_player(0, 0.016)
+	check(arena.players[0].pos.x == start.x + arena.CELL * 2 and arena.players[0].pos.y < start.y, "held direction turns at next tile center")
+	up.pressed = false
+	arena._input(up)
+	for frame in range(40):
+		arena.move_player(0, 0.016)
+	check(arena.players[0].pos == start + Vector2(arena.CELL * 2, -arena.CELL), "release after turning stops at center")
+
+
 
 
 func test_pickup_after_simultaneous_blasts(arena) -> void:

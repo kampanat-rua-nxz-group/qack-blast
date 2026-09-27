@@ -25,9 +25,8 @@ var round_over := false
 var result := ""
 var rng := RandomNumberGenerator.new()
 var previous_drop := [false, false]
-var turn_buffer := [Vector2.ZERO, Vector2.ZERO]
-var turn_buffer_time := [0.0, 0.0]
-var travel_direction := [Vector2.ZERO, Vector2.ZERO]
+var move_targets := [Vector2.ZERO, Vector2.ZERO]
+var held_directions := [[], []]
 
 
 func _ready() -> void:
@@ -41,9 +40,8 @@ func new_round() -> void:
 	flames.clear()
 	pickups.clear()
 	previous_drop = [false, false]
-	turn_buffer = [Vector2.ZERO, Vector2.ZERO]
-	turn_buffer_time = [0.0, 0.0]
-	travel_direction = [Vector2.ZERO, Vector2.ZERO]
+	move_targets = [Vector2.ZERO, Vector2.ZERO]
+	held_directions = [[], []]
 	round_over = false
 	result = ""
 	for y in range(HEIGHT):
@@ -158,7 +156,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if not event is InputEventKey or not event.pressed or event.echo:
+	if not event is InputEventKey or event.echo:
 		return
 	var player_index := -1
 	var direction := Vector2.ZERO
@@ -175,56 +173,35 @@ func _input(event: InputEvent) -> void:
 		KEY_S, KEY_DOWN:
 			player_index = 0 if event.keycode == KEY_S else 1
 			direction = Vector2.DOWN
-	if player_index >= 0:
-		turn_buffer[player_index] = direction
-		turn_buffer_time[player_index] = 0.22
+	if player_index < 0:
+		return
+	held_directions[player_index].erase(direction)
+	if event.pressed:
+		held_directions[player_index].append(direction)
+		if not round_over and players[player_index].alive and move_targets[player_index] == Vector2.ZERO:
+			start_move(player_index, direction)
 
 
-func requested_direction(i: int) -> Vector2:
-	var keys := [KEY_A, KEY_D, KEY_W, KEY_S] if i == 0 else [KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN]
-	var directions := [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]
-	var held := Vector2.ZERO
-	for index in range(keys.size()):
-		if Input.is_key_pressed(keys[index]):
-			if directions[index] != travel_direction[i]:
-				return directions[index]
-			held = directions[index]
-	return held
+func start_move(i: int, direction: Vector2) -> void:
+	var next_tile := tile_at(players[i].pos) + Vector2i(direction)
+	var target := center(next_tile)
+	if can_stand(target, i):
+		move_targets[i] = target
 
 
 func move_player(i: int, delta: float) -> void:
-	var direction: Vector2 = turn_buffer[i] if turn_buffer_time[i] > 0.0 else requested_direction(i)
-	turn_buffer_time[i] = maxf(0.0, turn_buffer_time[i] - delta)
-	if direction == Vector2.ZERO:
-		return
-	var target_tile: Vector2i = tile_at(players[i].pos) + Vector2i(direction)
-	if (direction == travel_direction[i] or not solid(target_tile, i)) and move_in_direction(i, delta, direction):
-		travel_direction[i] = direction
-		if turn_buffer[i] == direction:
-			turn_buffer_time[i] = 0.0
-	elif turn_buffer_time[i] > 0.0 and travel_direction[i] != Vector2.ZERO:
-		move_in_direction(i, delta, travel_direction[i])
-
-
-func move_in_direction(i: int, delta: float, direction: Vector2) -> bool:
-	var pos: Vector2 = players[i].pos
-	var current_tile := tile_at(pos)
-	var target := center(current_tile)
-	var step := SPEED * delta
-	# The perpendicular axis drifts toward the corridor centre, avoiding sticky corners.
-	if direction.x != 0.0 and absf(pos.y - target.y) < CELL * 0.36:
-		pos.y = move_toward(pos.y, target.y, step * 1.5)
-	elif direction.y != 0.0 and absf(pos.x - target.x) < CELL * 0.36:
-		pos.x = move_toward(pos.x, target.x, step * 1.5)
-	var next := pos + direction * step
-	if can_stand(next, i):
-		players[i].pos = next
-		update_safe_bomb(i)
-		return true
-	else:
-		players[i].pos = pos
-		update_safe_bomb(i)
-		return false
+	var target: Vector2 = move_targets[i]
+	if target == Vector2.ZERO:
+		if held_directions[i].is_empty():
+			return
+		start_move(i, held_directions[i].back())
+		target = move_targets[i]
+		if target == Vector2.ZERO:
+			return
+	players[i].pos = players[i].pos.move_toward(target, SPEED * delta)
+	update_safe_bomb(i)
+	if players[i].pos == target:
+		move_targets[i] = Vector2.ZERO
 
 
 func update_safe_bomb(i: int) -> void:
