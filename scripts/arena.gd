@@ -59,7 +59,7 @@ func new_round() -> void:
 	ensure_spawn_route(spawns[0], spawns[1])
 	players = []
 	for tile in spawns:
-		players.append({"pos": center(tile), "alive": true, "bomb_limit": 1, "range": 2, "safe_bomb": Vector2i(-1, -1)})
+		players.append({"pos": center(tile), "alive": true, "bomb_limit": 1, "range": 1, "safe_bomb": Vector2i(-1, -1)})
 	queue_redraw()
 
 

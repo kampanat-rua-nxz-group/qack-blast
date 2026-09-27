@@ -20,6 +20,7 @@ func _initialize() -> void:
 	test_bomb_exit(arena)
 	test_one_press_moves_one_tile(arena)
 	test_hold_repeats_at_tile_centers(arena)
+	test_initial_blast_range(arena)
 	test_simultaneous_blasts(arena)
 	test_pickup_after_simultaneous_blasts(arena)
 	print("Arena checks: %d failure(s)" % failures)
@@ -151,6 +152,14 @@ func test_hold_repeats_at_tile_centers(arena) -> void:
 	check(arena.players[0].pos == start + Vector2(arena.CELL * 2, -arena.CELL), "release after turning stops at center")
 
 
+func test_initial_blast_range(arena) -> void:
+	arena.new_round()
+	clear_crates(arena)
+	arena.players[0].pos = arena.center(Vector2i(3, 3))
+	arena.place_bomb(0)
+	arena.update_bombs(arena.FUSE)
+	check(has_flame(arena, Vector2i(4, 3), 0), "initial blast reaches the adjacent tile")
+	check(not has_flame(arena, Vector2i(5, 3), 0), "initial blast stops before the second tile")
 
 
 func test_pickup_after_simultaneous_blasts(arena) -> void:
