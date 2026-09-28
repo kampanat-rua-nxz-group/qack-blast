@@ -22,4 +22,5 @@ mkdir -p "$template_dir"
 cp "$build_tools"/templates/web_nothreads* "$template_dir/"
 
 sed -i "s|public_server_url=\"\"|public_server_url=\"wss://$QACK_SERVER_HOST\"|" project.godot
+mkdir -p build/web
 "$build_tools/Godot_v4.7.2-stable_linux.x86_64" --headless --path . --export-release Web build/web/index.html
