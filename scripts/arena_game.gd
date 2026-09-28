@@ -13,6 +13,9 @@ const CRATE = 2
 const OPEN = 0
 const PICKUP_BOMB_CAPACITY = 0
 const PICKUP_BLAST_RANGE = 1
+const CLOSE_START = 300.0
+const CLOSE_INTERVAL = 30.0
+const CLOSE_WARNING = 5.0
 const DIRECTIONS = [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
 
 var board: Array = []
@@ -20,6 +23,11 @@ var players: Array = []
 var bombs: Array = []
 var flames: Array = []
 var pickups: Dictionary = {}
+var player_count := 2
+var wall_mode := "fixed"
+var round_elapsed := 0.0
+var closed_layers := 0
+var next_close_at := CLOSE_START
 var scores := [{"wins": 0, "kills": 0}, {"wins": 0, "kills": 0}]
 var round_over := false
 var result := ""
@@ -32,25 +40,74 @@ func new_round() -> void:
 	bombs.clear()
 	flames.clear()
 	pickups.clear()
-	move_targets = [Vector2.ZERO, Vector2.ZERO]
+	move_targets.clear()
+	for i in range(player_count):
+		move_targets.append(Vector2.ZERO)
+	while scores.size() < player_count:
+		scores.append({"wins": 0, "kills": 0})
 	round_over = false
 	result = ""
+	round_elapsed = 0.0
+	closed_layers = 0
+	next_close_at = CLOSE_START
 	for y in range(HEIGHT):
 		var row: Array = []
 		for x in range(WIDTH):
 			var edge := x == 0 or y == 0 or x == WIDTH - 1 or y == HEIGHT - 1
-			var pillar := x % 2 == 0 and y % 2 == 0
-			row.append(WALL if edge or pillar else (CRATE if rng.randf() < 0.57 else OPEN))
+			var pillar := wall_mode == "fixed" and x % 2 == 0 and y % 2 == 0
+			row.append(WALL if edge or pillar else OPEN)
 		board.append(row)
-	var spawns := [Vector2i(1, 1), Vector2i(WIDTH - 2, HEIGHT - 2)]
+	var spawns := [Vector2i(1, 1), Vector2i(WIDTH - 2, HEIGHT - 2), Vector2i(WIDTH - 2, 1), Vector2i(1, HEIGHT - 2)]
+	spawns.resize(player_count)
+	if wall_mode == "random":
+		generate_random_walls(spawns)
+	for y in range(1, HEIGHT - 1):
+		for x in range(1, WIDTH - 1):
+			if board[y][x] == OPEN and rng.randf() < 0.57:
+				board[y][x] = CRATE
 	for tile in spawns:
 		for clear_tile in [tile, tile + Vector2i.RIGHT, tile + Vector2i.LEFT, tile + Vector2i.UP, tile + Vector2i.DOWN]:
 			if inside(clear_tile) and board[clear_tile.y][clear_tile.x] != WALL:
 				board[clear_tile.y][clear_tile.x] = OPEN
-	ensure_spawn_route(spawns[0], spawns[1])
+	for i in range(1, spawns.size()):
+		ensure_spawn_route(spawns[0], spawns[i])
 	players = []
 	for tile in spawns:
 		players.append({"pos": center(tile), "alive": true, "bomb_limit": 1, "range": 1, "safe_bomb": Vector2i(-1, -1), "facing": 0.0})
+
+
+func generate_random_walls(spawns: Array) -> void:
+	for y in range(1, HEIGHT - 1):
+		for x in range(1, WIDTH - 1):
+			var tile := Vector2i(x, y)
+			var near_spawn := false
+			for spawn in spawns:
+				if absi(tile.x - spawn.x) + absi(tile.y - spawn.y) <= 1:
+					near_spawn = true
+					break
+			if near_spawn or rng.randf() >= 0.25:
+				continue
+			board[y][x] = WALL
+			if not open_tiles_connected():
+				board[y][x] = OPEN
+
+
+func open_tiles_connected() -> bool:
+	var start := Vector2i(1, 1)
+	var visited := {start: true}
+	var queue := [start]
+	while not queue.is_empty():
+		var tile: Vector2i = queue.pop_front()
+		for direction in DIRECTIONS:
+			var next_tile: Vector2i = tile + direction
+			if inside(next_tile) and board[next_tile.y][next_tile.x] != WALL and not visited.has(next_tile):
+				visited[next_tile] = true
+				queue.append(next_tile)
+	for y in range(1, HEIGHT - 1):
+		for x in range(1, WIDTH - 1):
+			if board[y][x] != WALL and not visited.has(Vector2i(x, y)):
+				return false
+	return true
 
 
 func inside(tile: Vector2i) -> bool:
@@ -84,7 +141,7 @@ func tile_at(pos: Vector2) -> Vector2i:
 
 
 func solid(tile: Vector2i, player_index: int) -> bool:
-	if not inside(tile) or board[tile.y][tile.x] != OPEN:
+	if not inside(tile) or board[tile.y][tile.x] != OPEN or is_closed(tile):
 		return true
 	for bomb in bombs:
 		if bomb.tile == tile and players[player_index].safe_bomb != tile:
@@ -111,6 +168,7 @@ func overlaps_tile(pos: Vector2, tile: Vector2i) -> bool:
 func step(delta: float, directions: Array, plant_requests: Array) -> void:
 	if round_over:
 		return
+	round_elapsed += delta
 	for i in range(players.size()):
 		if not players[i].alive:
 			continue
@@ -149,6 +207,38 @@ func step(delta: float, directions: Array, plant_requests: Array) -> void:
 		if not players[i].alive and not tied and closest_owner != i:
 			scores[closest_owner].kills += 1
 	resolve_round()
+	if round_over:
+		return
+	while round_elapsed >= next_close_at and not round_over:
+		closed_layers += 1
+		next_close_at += CLOSE_INTERVAL
+		apply_closing_deaths()
+		resolve_round()
+	if not round_over:
+		apply_closing_deaths()
+		resolve_round()
+
+
+func is_closed(tile: Vector2i) -> bool:
+	return tile.x > 0 and tile.x < WIDTH - 1 and tile.y > 0 and tile.y < HEIGHT - 1 and (tile.x <= closed_layers or tile.x >= WIDTH - 1 - closed_layers or tile.y <= closed_layers or tile.y >= HEIGHT - 1 - closed_layers)
+
+
+func warning_tiles() -> Array[Vector2i]:
+	var tiles: Array[Vector2i] = []
+	if round_over or round_elapsed < next_close_at - CLOSE_WARNING or closed_layers >= mini(WIDTH, HEIGHT) / 2:
+		return tiles
+	var layer := closed_layers + 1
+	for y in range(1, HEIGHT - 1):
+		for x in range(1, WIDTH - 1):
+			if mini(mini(x, WIDTH - 1 - x), mini(y, HEIGHT - 1 - y)) == layer:
+				tiles.append(Vector2i(x, y))
+	return tiles
+
+
+func apply_closing_deaths() -> void:
+	for player in players:
+		if player.alive and is_closed(tile_at(player.pos)):
+			player.alive = false
 
 
 func start_move(i: int, direction: Vector2) -> void:
@@ -258,7 +348,7 @@ func resolve_round() -> void:
 
 func score_order() -> Array[int]:
 	var order: Array[int] = []
-	for i in range(scores.size()):
+	for i in range(players.size()):
 		order.append(i)
 	order.sort_custom(_score_before)
 	return order

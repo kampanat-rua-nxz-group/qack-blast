@@ -6,9 +6,11 @@ If the game opens in Godot's floating Game window, set the Game bar's **Interact
 
 - Player 1: Use **WASD** to move tile by tile; hold a key to keep moving. **Space** plants a bomb.
 - Player 2: Use **Arrow keys** to move tile by tile; hold a key to keep moving. **Enter** plants a bomb.
-- After a win or draw: **R** to regenerate the arena. Wins and Kills remain on the player cards until the game closes.
+- **M** selects the permanent wall layout for the next round: **Fixed** or **Random**. **R** starts that round once a different layout is selected, or rematches after a win or draw. Wins and Kills remain on the player cards until the game closes.
 
-This slice tests local movement, map generation, bombs, blast chains, destructible walls, the two powerups, and local Wins/Kills across rematches. It uses simple shapes so gameplay can be evaluated before artwork. Rooms, browser export, networking, and the five-minute closing wall are the next milestones.
+The round rules support 2–4 players with distinct corner spawns, connected routes, and per-player Wins/Kills. The current keyboard scene starts with two local players; players 3–4 are available in the game model for the planned online room controls. Destructible walls reroll each round in either map mode. The fixed permanent walls repeat, while the random walls change with the round seed.
+
+At five minutes, the outer walkable ring becomes permanently dangerous. Another ring closes every 30 seconds, with a flashing five-second warning before each closure. Closing deaths award no Kill; if the last players die together, the round is a draw. The game uses simple shapes so gameplay can be evaluated before artwork. Rooms, browser export, and networking remain future milestones.
 
 `scripts/arena_game.gd` owns the board, players, bombs, pickups, and round rules. `scripts/arena.gd` reads local controls and draws the scene; it advances the game through `game.step(delta, directions, plant_requests)`.
 

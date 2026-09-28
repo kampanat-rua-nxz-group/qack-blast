@@ -1,13 +1,14 @@
 extends Node2D
 
 const ArenaGame = preload("res://scripts/arena_game.gd")
-const COLORS = [Color("65cfc6"), Color("f58fb1")]
+const COLORS = [Color("65cfc6"), Color("f58fb1"), Color("f4c66c"), Color("a995e8")]
 
 var game = ArenaGame.new()
 var previous_drop := [false, false]
 var held_directions := [[], []]
 var visual_facing := [0.0, 0.0]
 var walk_phase := [0.0, 0.0]
+var selected_wall_mode := "fixed"
 
 
 func _ready() -> void:
@@ -16,29 +17,37 @@ func _ready() -> void:
 
 
 func new_round() -> void:
+	game.wall_mode = selected_wall_mode
 	game.new_round()
-	previous_drop = [false, false]
-	held_directions = [[], []]
-	visual_facing = [0.0, 0.0]
-	walk_phase = [0.0, 0.0]
+	previous_drop.clear()
+	held_directions.clear()
+	visual_facing.clear()
+	walk_phase.clear()
+	for i in range(game.players.size()):
+		previous_drop.append(false)
+		held_directions.append([])
+		visual_facing.append(0.0)
+		walk_phase.append(0.0)
 	queue_redraw()
 
 
 func _physics_process(delta: float) -> void:
-	if Input.is_key_pressed(KEY_R) and game.round_over:
+	if Input.is_key_pressed(KEY_R) and (game.round_over or selected_wall_mode != game.wall_mode):
 		new_round()
 	if game.round_over:
 		return
 	var old_positions: Array[Vector2] = []
-	var directions := [Vector2.ZERO, Vector2.ZERO]
-	var plant_requests := [false, false]
+	var directions := []
+	var plant_requests := []
 	for i in range(game.players.size()):
+		directions.append(Vector2.ZERO)
+		plant_requests.append(false)
 		old_positions.append(game.players[i].pos)
 		if not game.players[i].alive:
 			continue
 		if not held_directions[i].is_empty():
 			directions[i] = held_directions[i].back()
-		var drop := Input.is_key_pressed(KEY_SPACE if i == 0 else KEY_ENTER)
+		var drop := i < 2 and Input.is_key_pressed(KEY_SPACE if i == 0 else KEY_ENTER)
 		plant_requests[i] = drop and not previous_drop[i]
 		previous_drop[i] = drop
 	game.step(delta, directions, plant_requests)
@@ -50,6 +59,10 @@ func _physics_process(delta: float) -> void:
 
 func _input(event: InputEvent) -> void:
 	if not event is InputEventKey or event.echo:
+		return
+	if event.pressed and event.keycode == KEY_M:
+		selected_wall_mode = "random" if selected_wall_mode == "fixed" else "fixed"
+		queue_redraw()
 		return
 	var player_index := -1
 	var direction := Vector2.ZERO
@@ -81,9 +94,12 @@ func _draw() -> void:
 	draw_circle(Vector2(30, 35), 104.0, Color("ffe8d9"))
 	draw_circle(Vector2(934, 678), 140.0, Color("e4f5ed"))
 	draw_string(font, Vector2(142, 43), "QACK BLAST", HORIZONTAL_ALIGNMENT_LEFT, -1, 31, Color("403d57"))
-	draw_string(font, Vector2(143, 66), "a tiny bomb battle for two", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("867f91"))
+	draw_string(font, Vector2(143, 66), "a tiny bomb battle for 2-4", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("867f91"))
 	rounded_box(Rect2(704, 24, 114, 38), Color("ffe1a6"), 19.0)
-	centered_text("LOCAL  2P", Vector2(761, 49), 15, Color("73512d"))
+	centered_text("LOCAL  %dP" % game.players.size(), Vector2(761, 49), 15, Color("73512d"))
+	centered_text("%s  %d:%02d" % [game.wall_mode.to_upper(), int(game.round_elapsed) / 60, int(game.round_elapsed) % 60], Vector2(635, 49), 13, Color("73512d"))
+	if selected_wall_mode != game.wall_mode:
+		centered_text("NEXT: %s" % selected_wall_mode.to_upper(), Vector2(510, 49), 13, Color("92536b"))
 	rounded_box(Rect2(136, 76, 688, 584), Color("d8d2df"), 13.0)
 	rounded_box(Rect2(138, 78, 684, 580), Color("fffdf6"), 11.0)
 	for y in range(game.HEIGHT):
@@ -99,6 +115,13 @@ func _draw() -> void:
 				draw_circle(game.center(tile) + Vector2(13, -12), 2.5, Color("d3ebd8"))
 			if game.pickups.has(tile):
 				draw_pickup(game.center(tile), game.pickups[tile])
+			if game.is_closed(tile):
+				draw_rect(rect.grow(-2.0), Color("a13f5bd9"))
+	var warning_on := int(floor(game.round_elapsed * 2.0)) % 2 == 0
+	if warning_on:
+		for tile in game.warning_tiles():
+			var rect := Rect2(game.ORIGIN + Vector2(tile) * game.CELL, Vector2.ONE * game.CELL)
+			draw_rect(rect.grow(-3.0), Color("f5a65599"), false, 5.0)
 	for bomb in game.bombs:
 		draw_bomb(game.center(bomb.tile), bomb.time)
 	var flame_owners := {}
@@ -118,17 +141,17 @@ func _draw() -> void:
 	rounded_box(Rect2(142, 667, 259, 29), Color("e7f2ed"), 14.0)
 	rounded_box(Rect2(416, 667, 402, 29), Color("f9e8ed"), 14.0)
 	centered_text("P1  WASD  +  SPACE", Vector2(271, 687), 14, Color("366b68"))
-	centered_text("P2  ARROWS  +  ENTER     |     R  REMATCH", Vector2(617, 687), 14, Color("92536b"))
+	centered_text("P2 ARROWS + ENTER  |  M NEXT MAP  R START", Vector2(617, 687), 12, Color("92536b"))
 	if game.round_over:
 		draw_rect(Rect2(game.ORIGIN, Vector2(game.WIDTH * game.CELL, game.HEIGHT * game.CELL)), Color("44395488"))
 		rounded_box(Rect2(273, 229, 414, 242), Color("b4a5b8"), 25.0)
 		rounded_box(Rect2(269, 224, 414, 242), Color("fffaf0"), 25.0)
 		centered_text("ROUND OVER", Vector2(476, 262), 16, Color("aa8a89"))
-		centered_text("IT'S A DRAW!" if game.result == "DRAW" else "PLAYER %d WINS!" % (1 if game.result == "PLAYER 1 WINS" else 2), Vector2(476, 312), 32, Color("403d57"))
+		centered_text("IT'S A DRAW!" if game.result == "DRAW" else game.result + "!", Vector2(476, 312), 32, Color("403d57"))
 		var ranked := game.score_order()
 		for rank in range(ranked.size()):
 			var i: int = ranked[rank]
-			centered_text("%d. PLAYER %d    WINS %d    KILLS %d" % [rank + 1, i + 1, game.scores[i].wins, game.scores[i].kills], Vector2(476, 355 + rank * 27), 15, Color("403d57"))
+			centered_text("%d. PLAYER %d    WINS %d    KILLS %d" % [rank + 1, i + 1, game.scores[i].wins, game.scores[i].kills], Vector2(476, 331 + rank * 23), 13, Color("403d57"))
 		rounded_box(Rect2(352, 414, 248, 36), Color("ffe1a6"), 18.0)
 		centered_text("PRESS R TO PLAY AGAIN", Vector2(476, 438), 16, Color("73512d"))
 
@@ -182,10 +205,11 @@ func draw_flame(pos: Vector2, owners: Array) -> void:
 		draw_circle(pos, 10.0, color.lightened(0.45))
 	else:
 		rounded_box(rect, Color("fff2d6"), 16.0)
-		draw_circle(pos + Vector2(-10, 0), 17.0, COLORS[0])
-		draw_circle(pos + Vector2(10, 0), 17.0, COLORS[1])
-		draw_circle(pos + Vector2(-10, 0), 7.0, COLORS[0].lightened(0.45))
-		draw_circle(pos + Vector2(10, 0), 7.0, COLORS[1].lightened(0.45))
+		var offsets := [Vector2(-10, -10), Vector2(10, -10), Vector2(-10, 10), Vector2(10, 10)]
+		for index in range(owners.size()):
+			var color: Color = COLORS[owners[index]]
+			draw_circle(pos + offsets[index], 12.0, color)
+			draw_circle(pos + offsets[index], 5.0, color.lightened(0.45))
 
 
 func draw_bomb(pos: Vector2, fuse: float) -> void:
@@ -216,13 +240,14 @@ func draw_duck(pos: Vector2, player_index: int, angle: float = 0.0, phase: float
 
 
 func draw_player_card(i: int) -> void:
-	var x := 10.0 if i == 0 else 830.0
-	var tint := Color("ddf2ed") if i == 0 else Color("fce3eb")
-	rounded_box(Rect2(x, 110, 120, 202), Color("e3d8d5"), 17.0)
-	rounded_box(Rect2(x, 107, 120, 202), Color("fffdf7"), 17.0)
-	rounded_box(Rect2(x + 8, 115, 104, 65), tint, 12.0)
-	draw_duck(Vector2(x + 60, 147), i)
-	centered_text("PLAYER %d" % (i + 1), Vector2(x + 60, 208), 17, Color("403d57"))
-	centered_text("READY!" if game.players[i].alive else "OUT!", Vector2(x + 60, 229), 13, Color("5f9b80") if game.players[i].alive else Color("c77c83"))
-	centered_text("BOMB %d   FIRE %d" % [game.players[i].bomb_limit, game.players[i].range], Vector2(x + 60, 260), 12, Color("827b8b"))
-	centered_text("WINS %d   KILLS %d" % [game.scores[i].wins, game.scores[i].kills], Vector2(x + 60, 288), 12, Color("827b8b"))
+	var x := 10.0 if i % 2 == 0 else 830.0
+	var y := 107.0 if i < 2 else 335.0
+	var tint: Color = COLORS[i].lightened(0.72)
+	rounded_box(Rect2(x, y + 3, 120, 202), Color("e3d8d5"), 17.0)
+	rounded_box(Rect2(x, y, 120, 202), Color("fffdf7"), 17.0)
+	rounded_box(Rect2(x + 8, y + 8, 104, 65), tint, 12.0)
+	draw_duck(Vector2(x + 60, y + 40), i)
+	centered_text("PLAYER %d" % (i + 1), Vector2(x + 60, y + 101), 17, Color("403d57"))
+	centered_text("READY!" if game.players[i].alive else "OUT!", Vector2(x + 60, y + 122), 13, Color("5f9b80") if game.players[i].alive else Color("c77c83"))
+	centered_text("BOMB %d   FIRE %d" % [game.players[i].bomb_limit, game.players[i].range], Vector2(x + 60, y + 153), 12, Color("827b8b"))
+	centered_text("WINS %d   KILLS %d" % [game.scores[i].wins, game.scores[i].kills], Vector2(x + 60, y + 181), 12, Color("827b8b"))

@@ -38,6 +38,11 @@ func _initialize() -> void:
 	test_chain_with_self_blast_awards_one_kill()
 	test_simultaneous_kills_get_no_wins()
 	test_score_order_uses_wins_then_kills()
+	test_three_and_four_player_rounds()
+	test_scene_accepts_four_player_state(arena)
+	test_wall_modes()
+	test_wall_selection_applies_next_round(arena)
+	test_closing_hazard()
 	print("Arena checks: %d failure(s)" % failures)
 	quit(1 if failures else 0)
 
@@ -251,6 +256,167 @@ func test_score_order_uses_wins_then_kills() -> void:
 	check(game.score_order() == [1, 0], "Kills break equal Wins")
 	game.scores[0].kills = 9
 	check(game.score_order() == [0, 1], "equal scores keep player order")
+
+
+func test_three_and_four_player_rounds() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	check(game.get("player_count") != null, "game supports selecting a player count")
+	if game.get("player_count") == null:
+		return
+	game.player_count = 3
+	game.new_round()
+	check(game.players.size() == 3 and game.move_targets.size() == 3, "three players have movement state")
+	game.player_count = 4
+	game.new_round()
+	check(game.players.size() == 4 and game.scores.size() == 4, "four players have persistent score entries")
+	if game.players.size() != 4 or game.scores.size() != 4:
+		return
+	var spawns := [Vector2i(1, 1), Vector2i(11, 9), Vector2i(11, 1), Vector2i(1, 9)]
+	for i in range(4):
+		check(game.tile_at(game.players[i].pos) == spawns[i], "player %d has a distinct corner spawn" % (i + 1))
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO], [false, false, false, false])
+	check(not game.round_over, "four-player round stays active with four survivors")
+	game.flames.append({"tile": game.tile_at(game.players[0].pos), "owner": 3, "distance": 1, "time": game.FLAME_TIME})
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO], [false, false, false, false])
+	check(game.scores[3].kills == 1 and not game.round_over, "fourth player's blast can score during a four-player round")
+	for i in range(3):
+		game.players[i].alive = false
+	game.resolve_round()
+	check(game.result == "PLAYER 4 WINS" and game.scores[3].wins == 1, "last of four players gets one Win")
+	game.new_round()
+	check(game.scores[3].wins == 1, "four-player Win survives a rematch")
+	game.player_count = 2
+	game.new_round()
+	check(game.score_order().size() == 2, "rankings show active players when player count changes")
+
+
+func test_scene_accepts_four_player_state(arena) -> void:
+	arena.game.player_count = 4
+	arena.new_round()
+	arena._physics_process(0.016)
+	check(arena.held_directions.size() == 4 and arena.visual_facing.size() == 4, "scene state sizes match four players")
+	arena.game.player_count = 2
+	arena.new_round()
+
+
+func test_wall_modes() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	check(game.get("wall_mode") != null, "game offers a permanent wall mode")
+	if game.get("wall_mode") == null:
+		return
+	game.player_count = 4
+	var fixed_mask := ""
+	var random_masks := {}
+	var crate_masks := {"fixed": {}, "random": {}}
+	for mode in ["fixed", "random"]:
+		game.wall_mode = mode
+		for seed_value in range(40):
+			game.rng.seed = seed_value
+			game.new_round()
+			var mask := wall_mask(game)
+			crate_masks[mode][crate_mask(game)] = true
+			if mode == "fixed":
+				if seed_value == 0:
+					fixed_mask = mask
+				check(mask == fixed_mask, "fixed walls stay the same across seeds")
+			else:
+				random_masks[mask] = true
+			var reachable := reachable_open_tiles(game, game.tile_at(game.players[0].pos))
+			for player in game.players:
+				var spawn: Vector2i = game.tile_at(player.pos)
+				check(reachable.has(spawn), "%s seed %d connects all four spawns" % [mode, seed_value])
+				var exits := 0
+				for direction in game.DIRECTIONS:
+					var next_tile: Vector2i = spawn + direction
+					if game.inside(next_tile) and game.board[next_tile.y][next_tile.x] == game.OPEN:
+						exits += 1
+				check(exits >= 2, "%s seed %d gives every spawn two exits" % [mode, seed_value])
+	check(random_masks.size() > 1, "random permanent walls vary by seed")
+	check(crate_masks["fixed"].size() > 1 and crate_masks["random"].size() > 1, "destructible walls reroll in both modes")
+
+
+func test_wall_selection_applies_next_round(arena) -> void:
+	arena.new_round()
+	var current_mode: String = arena.game.wall_mode
+	var key := InputEventKey.new()
+	key.keycode = KEY_M
+	key.pressed = true
+	arena._input(key)
+	check(arena.game.wall_mode == current_mode, "map choice does not alter the active round")
+	arena.new_round()
+	check(arena.game.wall_mode != current_mode, "map choice applies on the next round")
+	arena._input(key)
+	arena.new_round()
+
+
+func wall_mask(game) -> String:
+	var mask := ""
+	for row in game.board:
+		for cell in row:
+			mask += "#" if cell == game.WALL else "."
+	return mask
+
+
+func crate_mask(game) -> String:
+	var mask := ""
+	for row in game.board:
+		for cell in row:
+			mask += "X" if cell == game.CRATE else "."
+	return mask
+
+
+func reachable_open_tiles(game, start: Vector2i) -> Dictionary:
+	var visited := {start: true}
+	var queue := [start]
+	while not queue.is_empty():
+		var tile: Vector2i = queue.pop_front()
+		for direction in game.DIRECTIONS:
+			var next_tile: Vector2i = tile + direction
+			if game.inside(next_tile) and game.board[next_tile.y][next_tile.x] == game.OPEN and not visited.has(next_tile):
+				visited[next_tile] = true
+				queue.append(next_tile)
+	return visited
+
+
+func test_closing_hazard() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	check(game.has_method("is_closed") and game.has_method("warning_tiles"), "game exposes closing hazard state")
+	if not game.has_method("is_closed") or not game.has_method("warning_tiles"):
+		return
+	game.new_round()
+	clear_crates(game)
+	game.players[0].pos = game.center(Vector2i(5, 5))
+	game.players[1].pos = game.center(Vector2i(7, 5))
+	var idle := [Vector2.ZERO, Vector2.ZERO]
+	var no_bombs := [false, false]
+	game.step(294.9, idle, no_bombs)
+	check(game.warning_tiles().is_empty() and not game.is_closed(Vector2i(1, 5)), "first ring has no warning before five-minute mark minus five seconds")
+	game.step(0.1, idle, no_bombs)
+	check(game.warning_tiles().has(Vector2i(1, 5)), "first ring warns for five seconds")
+	game.step(5.0, idle, no_bombs)
+	check(game.closed_layers == 1 and game.is_closed(Vector2i(1, 5)), "first ring closes at five minutes")
+	check(not game.is_closed(Vector2i(2, 5)) and not game.round_over, "interior remains safe after first ring")
+	game.step(25.0, idle, no_bombs)
+	check(game.warning_tiles().has(Vector2i(2, 5)), "second ring warns five seconds before closing")
+	game.step(5.0, idle, no_bombs)
+	check(game.closed_layers == 2 and game.is_closed(Vector2i(2, 5)) and game.is_closed(Vector2i(1, 5)), "later rings close every thirty seconds and stay dangerous")
+	var winner = load("res://scripts/arena_game.gd").new()
+	winner.new_round()
+	winner.players[1].pos = winner.center(Vector2i(5, 5))
+	winner.step(300.0, idle, no_bombs)
+	check(winner.result == "PLAYER 2 WINS" and winner.scores[1].wins == 1, "last survivor wins after a ring closes")
+	check(winner.scores[0].kills == 0 and winner.scores[1].kills == 0, "closing hazard awards no Kills")
+	var draw = load("res://scripts/arena_game.gd").new()
+	draw.new_round()
+	draw.step(300.0, idle, no_bombs)
+	check(draw.result == "DRAW" and draw.scores[0].wins == 0 and draw.scores[1].wins == 0, "simultaneous closing deaths draw without Wins")
+	check(draw.scores[0].kills == 0 and draw.scores[1].kills == 0, "simultaneous closing deaths award no Kills")
+	var skip = load("res://scripts/arena_game.gd").new()
+	skip.new_round()
+	skip.players[0].pos = skip.center(Vector2i(2, 5))
+	skip.players[1].pos = skip.center(Vector2i(10, 5))
+	skip.step(330.0, idle, no_bombs)
+	check(skip.closed_layers == 2 and skip.result == "DRAW", "large delta applies every overdue ring")
 
 
 func test_one_press_moves_one_tile(arena) -> void:
