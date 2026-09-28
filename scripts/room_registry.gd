@@ -77,7 +77,7 @@ func leave(peer_id: int) -> void:
 
 func choose_map(peer_id: int, mode: String) -> bool:
 	var room := room_for_peer(peer_id)
-	if room.is_empty() or room.phase == "playing" or not mode in ["fixed", "random"]:
+	if room.is_empty() or room.phase == "playing" or not mode in ArenaGame.MAP_MODES:
 		return false
 	if person_for_peer(room, peer_id).id != room.host:
 		return false

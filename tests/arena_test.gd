@@ -41,6 +41,7 @@ func _initialize() -> void:
 	test_three_and_four_player_rounds()
 	test_scene_accepts_four_player_state(arena)
 	test_wall_modes()
+	test_map_themes(arena)
 	test_wall_selection_applies_next_round(arena)
 	test_closing_hazard()
 	print("Arena checks: %d failure(s)" % failures)
@@ -307,18 +308,19 @@ func test_wall_modes() -> void:
 	game.player_count = 4
 	var fixed_mask := ""
 	var random_masks := {}
-	var crate_masks := {"fixed": {}, "random": {}}
-	for mode in ["fixed", "random"]:
+	var fixed_maps := {}
+	var crate_masks := {"fixed": {}, "random": {}, "pond": {}, "frost": {}}
+	for mode in ["fixed", "random", "pond", "frost"]:
 		game.wall_mode = mode
 		for seed_value in range(40):
 			game.rng.seed = seed_value
 			game.new_round()
 			var mask := wall_mask(game)
 			crate_masks[mode][crate_mask(game)] = true
-			if mode == "fixed":
+			if mode != "random":
 				if seed_value == 0:
 					fixed_mask = mask
-				check(mask == fixed_mask, "fixed walls stay the same across seeds")
+				check(mask == fixed_mask, "%s walls stay the same across seeds" % mode)
 			else:
 				random_masks[mask] = true
 			var reachable := reachable_open_tiles(game, game.tile_at(game.players[0].pos))
@@ -331,8 +333,12 @@ func test_wall_modes() -> void:
 					if game.inside(next_tile) and game.board[next_tile.y][next_tile.x] == game.OPEN:
 						exits += 1
 				check(exits >= 2, "%s seed %d gives every spawn two exits" % [mode, seed_value])
+		if mode != "random":
+			fixed_maps[mode] = fixed_mask
 	check(random_masks.size() > 1, "random permanent walls vary by seed")
-	check(crate_masks["fixed"].size() > 1 and crate_masks["random"].size() > 1, "destructible walls reroll in both modes")
+	check(fixed_maps["fixed"] != fixed_maps["pond"] and fixed_maps["fixed"] != fixed_maps["frost"] and fixed_maps["pond"] != fixed_maps["frost"], "named maps have distinct permanent walls")
+	for mode in crate_masks:
+		check(crate_masks[mode].size() > 1, "%s crates reroll" % mode)
 
 
 func test_wall_selection_applies_next_round(arena) -> void:
@@ -347,6 +353,23 @@ func test_wall_selection_applies_next_round(arena) -> void:
 	check(arena.game.wall_mode != current_mode, "map choice applies on the next round")
 	arena._input(key)
 	arena.new_round()
+	check(arena.game.wall_mode == "pond", "local map selection reaches pond")
+	arena._input(key)
+	arena.new_round()
+	check(arena.game.wall_mode == "frost", "local map selection reaches frost")
+	arena._input(key)
+	arena.new_round()
+
+
+func test_map_themes(arena) -> void:
+	if not arena.has_method("map_colors"):
+		check(false, "arena exposes map colors")
+		return
+	var classic: Dictionary = arena.map_colors("fixed")
+	var pond: Dictionary = arena.map_colors("pond")
+	var frost: Dictionary = arena.map_colors("frost")
+	for part in ["floor", "wall", "crate"]:
+		check(pond[part] != classic[part] and frost[part] != classic[part] and pond[part] != frost[part], "%s has distinct colors on each named map" % part)
 
 
 func wall_mask(game) -> String:

@@ -9,7 +9,7 @@ A classic competitive bomb-placing game for 2–4 friends, played online in a we
 ## Game Loop
 
 1. A player creates a room or enters a room code, sets a nickname, and waits for friends in the lobby.
-2. Before the round, the host chooses a fixed or random permanent wall layout, then starts once 2–4 players are present. Each player spawns at a different point with an exit route from the spawn.
+2. Before the round, the host chooses Classic, Random, Lily Pond, or Frost Garden, then starts once 2–4 players are present. Each player spawns at a different point with an exit route from the spawn.
 3. Players explore, plant bombs to destroy walls, collect items, and try to eliminate opponents.
 4. Eliminated players become spectators. The last survivor wins. If the final survivors are eliminated at the same moment, the round is a draw.
 5. The round result and scoreboard are shown, then everyone returns to the same lobby to start the next round.
@@ -18,7 +18,7 @@ A classic competitive bomb-placing game for 2–4 friends, played online in a we
 
 - Pressing a direction key once moves one tile in one of 4 directions. Holding the key keeps moving tile by tile, and each step ends at the center of a tile.
 - Releasing the key mid-move continues to the center of the current tile, then stops. Holding a new direction turns only when the player reaches a tile center.
-- Before the round, the host chooses one of two permanent wall layouts: a predefined layout or a newly randomized layout for that round. The layout cannot change during a round.
+- Before the round, the host chooses one of four maps: Classic, Random, Lily Pond, or Frost Garden. Each named map has a distinct permanent wall layout and visual theme; Random rerolls permanent walls each round. The map cannot change during a round.
 - Destructible walls are randomly repositioned at the start of every round in both modes. Spawn points must suit the layout in use.
 - Randomization of both permanent and destructible walls must guarantee an exit from every spawn point, routes that let players reach each other, and that no one is enclosed from the start.
 
@@ -71,7 +71,7 @@ A classic competitive bomb-placing game for 2–4 friends, played online in a we
 
 ## First Version Scope
 
-Includes private rooms, room codes, nicknames, Free-for-All play, one map size with a fixed or random permanent wall layout chosen before the round, randomized destructible walls, basic bombs and items, spectating after elimination, room scores, and rejoining after a network drop. Excludes accounts, public matchmaking, character skills, and permanent progression systems.
+Includes private rooms, room codes, nicknames, Free-for-All play, one map size with four selectable maps, randomized destructible walls, basic bombs and items, spectating after elimination, room scores, and rejoining after a network drop. Excludes accounts, public matchmaking, character skills, and permanent progression systems.
 
 ## Points to Confirm Before Building the Systems
 
