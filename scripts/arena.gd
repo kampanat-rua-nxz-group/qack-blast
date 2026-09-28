@@ -9,6 +9,7 @@ var held_directions := [[], []]
 var visual_facing := [0.0, 0.0]
 var walk_phase := [0.0, 0.0]
 var selected_wall_mode := "fixed"
+var networked := false
 
 
 func _ready() -> void:
@@ -96,7 +97,7 @@ func _draw() -> void:
 	draw_string(font, Vector2(142, 43), "QACK BLAST", HORIZONTAL_ALIGNMENT_LEFT, -1, 31, Color("403d57"))
 	draw_string(font, Vector2(143, 66), "a tiny bomb battle for 2-4", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("867f91"))
 	rounded_box(Rect2(704, 24, 114, 38), Color("ffe1a6"), 19.0)
-	centered_text("LOCAL  %dP" % game.players.size(), Vector2(761, 49), 15, Color("73512d"))
+	centered_text("%s  %dP" % ["ONLINE" if networked else "LOCAL", game.players.size()], Vector2(761, 49), 15, Color("73512d"))
 	centered_text("%s  %d:%02d" % [game.wall_mode.to_upper(), int(game.round_elapsed) / 60, int(game.round_elapsed) % 60], Vector2(635, 49), 13, Color("73512d"))
 	if selected_wall_mode != game.wall_mode:
 		centered_text("NEXT: %s" % selected_wall_mode.to_upper(), Vector2(510, 49), 13, Color("92536b"))
@@ -140,8 +141,8 @@ func _draw() -> void:
 		draw_player_card(i)
 	rounded_box(Rect2(142, 667, 259, 29), Color("e7f2ed"), 14.0)
 	rounded_box(Rect2(416, 667, 402, 29), Color("f9e8ed"), 14.0)
-	centered_text("P1  WASD  +  SPACE", Vector2(271, 687), 14, Color("366b68"))
-	centered_text("P2 ARROWS + ENTER  |  M NEXT MAP  R START", Vector2(617, 687), 12, Color("92536b"))
+	centered_text("WASD / ARROWS + SPACE / ENTER" if networked else "P1  WASD  +  SPACE", Vector2(271, 687), 12 if networked else 14, Color("366b68"))
+	centered_text("ROOM HOST STARTS NEXT ROUND" if networked else "P2 ARROWS + ENTER  |  M NEXT MAP  R START", Vector2(617, 687), 12, Color("92536b"))
 	if game.round_over:
 		draw_rect(Rect2(game.ORIGIN, Vector2(game.WIDTH * game.CELL, game.HEIGHT * game.CELL)), Color("44395488"))
 		rounded_box(Rect2(273, 229, 414, 242), Color("b4a5b8"), 25.0)
@@ -153,7 +154,7 @@ func _draw() -> void:
 			var i: int = ranked[rank]
 			centered_text("%d. PLAYER %d    WINS %d    KILLS %d" % [rank + 1, i + 1, game.scores[i].wins, game.scores[i].kills], Vector2(476, 331 + rank * 23), 13, Color("403d57"))
 		rounded_box(Rect2(352, 414, 248, 36), Color("ffe1a6"), 18.0)
-		centered_text("PRESS R TO PLAY AGAIN", Vector2(476, 438), 16, Color("73512d"))
+		centered_text("RETURN TO ROOM" if networked else "PRESS R TO PLAY AGAIN", Vector2(476, 438), 16, Color("73512d"))
 
 
 func rounded_box(rect: Rect2, color: Color, radius: float) -> void:
