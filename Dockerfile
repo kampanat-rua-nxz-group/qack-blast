@@ -1,6 +1,6 @@
 FROM ubuntu:24.04
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip libfontconfig1 \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip libfontconfig1 nginx \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fL "https://downloads.godotengine.org/?version=4.7.2&flavor=stable&platform=linux.64&slug=linux.x86_64.zip" -o /tmp/godot.zip \
@@ -13,6 +13,10 @@ WORKDIR /app
 COPY project.godot ./
 COPY scenes ./scenes
 COPY scripts ./scripts
+COPY deploy/nginx.conf.template /etc/nginx/conf.d/qack.conf.template
+COPY deploy/start-server.sh /usr/local/bin/start-server
+RUN chmod +x /usr/local/bin/start-server \
+    && rm /etc/nginx/sites-enabled/default
 
 EXPOSE 10000
-CMD ["sh", "-c", "exec godot --headless --path /app --script scripts/server_main.gd -- --bind=0.0.0.0 --port=${PORT:-10000}"]
+CMD ["/usr/local/bin/start-server"]

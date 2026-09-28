@@ -1,0 +1,20 @@
+server {
+    listen __PORT__;
+
+    location = /health {
+        return 200 "ok\n";
+    }
+
+    location / {
+        if ($http_upgrade = "") {
+            return 200 "ok\n";
+        }
+
+        proxy_pass http://127.0.0.1:9080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 3600s;
+    }
+}

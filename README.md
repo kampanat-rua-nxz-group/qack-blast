@@ -25,7 +25,7 @@ The server owns the game state and sends snapshots to every client. Room codes a
 
 The repository includes a Render Blueprint (`render.yaml`) for a Free WebSocket server and a free static game site. Render can connect to the private GitHub repository without making the source public. See [deployment costs and limits](docs/superpowers/specs/deployment-research.md). Both services share the workspace's monthly bandwidth and build-minute allowance.
 
-1. Push the repository to GitHub. In Render, connect the GitHub repository and create a **Blueprint** from `render.yaml` on the Free/Hobby plan. It builds the Godot server from `Dockerfile` and exports the browser game with `deploy/build-web.sh`.
+1. Push the repository to GitHub. In Render, connect the GitHub repository and create a **Blueprint** from `render.yaml` on the Free/Hobby plan. It builds the Godot server behind an HTTP/WebSocket proxy from `Dockerfile` and exports the browser game with `deploy/build-web.sh`.
 2. Wait for both services to deploy. The static site's address is its `https://<name>.onrender.com` URL. Its build receives the server's public hostname from the Blueprint and embeds `wss://<server-host>` automatically.
 3. Open the static site in two browsers, create a room in one, and join using its six-character code in the other. Share the static site URL with players; they do not need `?server=`. The query parameter still overrides the embedded address for testing.
 
