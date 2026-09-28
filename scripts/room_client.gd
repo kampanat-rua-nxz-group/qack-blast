@@ -18,12 +18,14 @@ var game: Dictionary = {}
 const DEFAULT_SERVER_URL = "ws://127.0.0.1:9080"
 
 
-static func resolve_server_url(args: PackedStringArray, web_value: String) -> String:
+static func resolve_server_url(args: PackedStringArray, web_value: String, public_url: String = "") -> String:
 	if not web_value.strip_edges().is_empty():
 		return web_value.strip_edges()
 	for arg in args:
 		if arg.begins_with("--server="):
 			return arg.trim_prefix("--server=")
+	if not public_url.strip_edges().is_empty():
+		return public_url.strip_edges()
 	return DEFAULT_SERVER_URL
 
 

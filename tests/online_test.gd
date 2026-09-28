@@ -19,6 +19,8 @@ func _initialize() -> void:
 
 func run_checks(app) -> void:
 	check(RoomClient.resolve_server_url(PackedStringArray(), "") == "ws://127.0.0.1:9080", "server URL defaults to local server")
+	check(RoomClient.resolve_server_url(PackedStringArray(), "", "wss://game.onrender.com") == "wss://game.onrender.com", "web build uses configured public server")
+	check(RoomClient.resolve_server_url(PackedStringArray(), "wss://override.example", "wss://game.onrender.com") == "wss://override.example", "query parameter overrides public server")
 	check(RoomClient.resolve_server_url(PackedStringArray(["--server=wss://duck.example"]), "") == "wss://duck.example", "server URL reads --server argument")
 	check(RoomClient.resolve_server_url(PackedStringArray(["--server=ws://a"]), " wss://b ") == "wss://b", "web server parameter wins")
 	check(app.lobby.find_children("*", "LineEdit", true, false).size() == 2, "entry screen hides server URL")
