@@ -27,6 +27,7 @@ func _initialize() -> void:
 	test_simultaneous_blasts(game)
 	test_simultaneous_deaths_are_draw(game)
 	test_pickup_after_simultaneous_blasts(game)
+	test_pickup_caps()
 	test_win_and_kill_persist()
 	test_chain_kill_belongs_to_triggered_bomb()
 	test_closer_blast_gets_kill()
@@ -366,6 +367,28 @@ func test_pickup_after_simultaneous_blasts(game) -> void:
 		if drops[0] != drops[1]:
 			check(false, "crate pickup survives a second blast in the same tick (seed %d)" % seed_value)
 			return
+
+
+func test_pickup_caps() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.new_round()
+	var spawn := Vector2i(1, 1)
+	var idle := [Vector2.ZERO, Vector2.ZERO]
+	var no_bombs := [false, false]
+	game.players[0].bomb_limit = 4
+	game.pickups[spawn] = game.PICKUP_BOMB_CAPACITY
+	game.step(0.016, idle, no_bombs)
+	check(game.players[0].bomb_limit == 5 and not game.pickups.has(spawn), "bomb pickup reaches cap and is consumed")
+	game.pickups[spawn] = game.PICKUP_BOMB_CAPACITY
+	game.step(0.016, idle, no_bombs)
+	check(game.players[0].bomb_limit == 5 and not game.pickups.has(spawn), "extra bomb pickup cannot exceed cap")
+	game.players[0].range = 5
+	game.pickups[spawn] = game.PICKUP_BLAST_RANGE
+	game.step(0.016, idle, no_bombs)
+	check(game.players[0].range == 6 and not game.pickups.has(spawn), "range pickup reaches cap and is consumed")
+	game.pickups[spawn] = game.PICKUP_BLAST_RANGE
+	game.step(0.016, idle, no_bombs)
+	check(game.players[0].range == 6 and not game.pickups.has(spawn), "extra range pickup cannot exceed cap")
 
 
 func clear_crates(game) -> void:
