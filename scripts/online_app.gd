@@ -3,16 +3,18 @@ extends Control
 const RoomClient = preload("res://scripts/room_client.gd")
 const ArenaScene = preload("res://scenes/arena.tscn")
 const LobbyArt = preload("res://scripts/lobby_art.gd")
-const NAVY = Color("403d57")
-const MUTED = Color("867f91")
+const Ui = preload("res://scripts/lobby_ui.gd")
 
 var client = RoomClient.new()
 var arena: Node2D
 var lobby: Control
-var server_field: LineEdit
+var server_url := RoomClient.DEFAULT_SERVER_URL
 var name_field: LineEdit
 var code_field: LineEdit
+var entry_card: Control
+var waiting_card: Control
 var room_label: Label
+var room_detail_label: Label
 var roster_label: Label
 var status_label: Label
 var start_button: Button
@@ -25,6 +27,7 @@ var input_clock := 0.0
 
 
 func _ready() -> void:
+	server_url = RoomClient.resolve_server_url(OS.get_cmdline_user_args(), web_server_param())
 	arena = ArenaScene.instantiate()
 	arena.networked = true
 	add_child(arena)
@@ -41,6 +44,13 @@ func _ready() -> void:
 	build_lobby()
 
 
+func web_server_param() -> String:
+	if not OS.has_feature("web"):
+		return ""
+	var value = JavaScriptBridge.eval("new URLSearchParams(window.location.search).get('server') || ''", true)
+	return str(value) if value != null else ""
+
+
 func build_lobby() -> void:
 	lobby = Control.new()
 	lobby.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -49,137 +59,73 @@ func build_lobby() -> void:
 	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	lobby.add_child(art)
-	var column := card(lobby, Vector2(142, 126), Vector2(414, 508), 24)
-	label(column, "READY TO PLAY?", 24, NAVY)
-	label(column, "Create a room or join your friends.", 15, MUTED)
-	spacer(column, 9)
-	server_field = field(column, "WEBSOCKET SERVER", "ws://127.0.0.1:9080")
-	name_field = field(column, "NICKNAME", "Duck")
-	code_field = field(column, "ROOM CODE", "")
-	spacer(column, 7)
+	build_entry_card()
+	build_waiting_card()
+	var status_column := Ui.card(lobby, "StatusCard", Vector2(574, 126), Vector2(244, 508), 20)
+	Ui.label(status_column, "ROOM STATUS", 20, Ui.NAVY)
+	Ui.spacer(status_column, 5)
+	room_detail_label = Ui.label(status_column, "No room yet", 16, Ui.NAVY)
+	room_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	Ui.spacer(status_column, 8)
+	roster_label = Ui.label(status_column, "", 14, Ui.NAVY)
+	roster_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status_label = Ui.label(status_column, "Enter a nickname to begin.", 14, Ui.MUTED)
+	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status_label.custom_minimum_size.y = 72
+	Ui.spacer(status_column, 6)
+	map_button = Ui.button(status_column, "CHANGE MAP", 42, Color("e7f2ed"), Color("366b68"))
+	map_button.disabled = true
+	map_button.pressed.connect(_change_map)
+	start_button = Ui.button(status_column, "START ROUND", 42, Color("ffe1a6"), Color("73512d"))
+	start_button.disabled = true
+	start_button.pressed.connect(func(): client.send({"type": "start"}))
+	leave_button = Ui.button(status_column, "LEAVE ROOM", 42, Color("f9e8ed"), Color("92536b"))
+	leave_button.disabled = true
+	leave_button.pressed.connect(func(): client.send({"type": "leave"}))
+
+
+func build_entry_card() -> void:
+	var column := Ui.card(lobby, "EntryCard", Vector2(142, 126), Vector2(414, 508), 24)
+	entry_card = column.get_parent().get_parent()
+	Ui.label(column, "READY TO PLAY?", 24, Ui.NAVY)
+	Ui.label(column, "Create a room or join your friends.", 15, Ui.MUTED)
+	Ui.spacer(column, 9)
+	name_field = Ui.field(column, "NICKNAME", "Duck")
+	code_field = Ui.field(column, "ROOM CODE", "")
+	Ui.spacer(column, 7)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	column.add_child(row)
-	var create_button := Button.new()
-	create_button.text = "CREATE ROOM"
-	create_button.custom_minimum_size = Vector2(169, 47)
-	button_style(create_button, Color("ffe1a6"), Color("73512d"))
+	var create_button := Ui.button(row, "CREATE ROOM", 47, Color("ffe1a6"), Color("73512d"))
+	create_button.custom_minimum_size.x = 169
 	create_button.pressed.connect(func(): request({"type": "create", "name": name_field.text}))
-	row.add_child(create_button)
-	var join_button := Button.new()
-	join_button.text = "JOIN ROOM"
-	join_button.custom_minimum_size = Vector2(169, 47)
-	button_style(join_button, Color("f9e8ed"), Color("92536b"))
+	var join_button := Ui.button(row, "JOIN ROOM", 47, Color("f9e8ed"), Color("92536b"))
+	join_button.custom_minimum_size.x = 169
 	join_button.pressed.connect(func(): request({"type": "join", "name": name_field.text, "code": code_field.text}))
-	row.add_child(join_button)
-	spacer(column, 8)
-	label(column, "Start the room server before creating a room.", 13, MUTED)
-	label(column, "Each window controls one duck.", 13, MUTED)
-	var status_column := card(lobby, Vector2(574, 126), Vector2(244, 508), 20)
-	label(status_column, "ROOM STATUS", 20, NAVY)
-	spacer(status_column, 5)
-	room_label = label(status_column, "No room yet", 16, NAVY)
-	room_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	spacer(status_column, 8)
-	roster_label = label(status_column, "", 14, NAVY)
-	roster_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	status_label = label(status_column, "Enter a nickname to begin.", 14, MUTED)
-	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	status_label.custom_minimum_size.y = 72
-	spacer(status_column, 6)
-	map_button = Button.new()
-	map_button.text = "CHANGE MAP"
-	map_button.custom_minimum_size.y = 42
-	button_style(map_button, Color("e7f2ed"), Color("366b68"))
-	map_button.disabled = true
-	map_button.pressed.connect(_change_map)
-	status_column.add_child(map_button)
-	start_button = Button.new()
-	start_button.text = "START ROUND"
-	start_button.custom_minimum_size.y = 42
-	button_style(start_button, Color("ffe1a6"), Color("73512d"))
-	start_button.disabled = true
-	start_button.pressed.connect(func(): client.send({"type": "start"}))
-	status_column.add_child(start_button)
-	leave_button = Button.new()
-	leave_button.text = "LEAVE ROOM"
-	leave_button.custom_minimum_size.y = 42
-	button_style(leave_button, Color("f9e8ed"), Color("92536b"))
-	leave_button.disabled = true
-	leave_button.pressed.connect(func(): client.send({"type": "leave"}))
-	status_column.add_child(leave_button)
+	Ui.spacer(column, 8)
+	Ui.label(column, "Start the room server before creating a room.", 13, Ui.MUTED)
+	Ui.label(column, "Each window controls one duck.", 13, Ui.MUTED)
 
 
-func field(parent: VBoxContainer, label_text: String, initial: String) -> LineEdit:
-	label(parent, label_text, 13, MUTED)
-	var edit := LineEdit.new()
-	edit.text = initial
-	edit.custom_minimum_size.y = 44
-	edit.add_theme_font_size_override("font_size", 16)
-	edit.add_theme_color_override("font_color", NAVY)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color("fffdf7")
-	style.border_color = Color("d8d2df")
-	style.set_border_width_all(2)
-	style.set_corner_radius_all(12)
-	style.content_margin_left = 13
-	style.content_margin_right = 13
-	edit.add_theme_stylebox_override("normal", style)
-	edit.add_theme_stylebox_override("focus", style)
-	parent.add_child(edit)
-	return edit
+func build_waiting_card() -> void:
+	var column := Ui.card(lobby, "WaitingCard", Vector2(142, 126), Vector2(414, 508), 24)
+	waiting_card = column.get_parent().get_parent()
+	waiting_card.hide()
+	Ui.label(column, "WAITING FOR DUCKS", 24, Ui.NAVY)
+	Ui.label(column, "Share this code with your friends.", 15, Ui.MUTED)
+	Ui.spacer(column, 9)
+	Ui.label(column, "ROOM CODE", 13, Ui.MUTED)
+	room_label = Ui.label(column, "", 48, Ui.NAVY)
+	var copy_button := Ui.button(column, "COPY CODE", 47, Color("e7f2ed"), Color("366b68"))
+	copy_button.name = "CopyCodeButton"
+	copy_button.pressed.connect(_copy_code)
+	Ui.spacer(column, 8)
+	Ui.label(column, "The host starts the round once 2–4 players have joined.", 13, Ui.MUTED)
 
 
-func card(parent: Control, at: Vector2, dimensions: Vector2, inset: int) -> VBoxContainer:
-	var panel := PanelContainer.new()
-	panel.position = at
-	panel.custom_minimum_size = dimensions
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color("fffdf7")
-	style.border_color = Color("d8d2df")
-	style.set_border_width_all(2)
-	style.set_corner_radius_all(22)
-	style.shadow_color = Color("e3d8d5")
-	style.shadow_size = 5
-	style.shadow_offset = Vector2(0, 5)
-	panel.add_theme_stylebox_override("panel", style)
-	parent.add_child(panel)
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", inset)
-	margin.add_theme_constant_override("margin_right", inset)
-	margin.add_theme_constant_override("margin_top", inset)
-	margin.add_theme_constant_override("margin_bottom", inset)
-	panel.add_child(margin)
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
-	margin.add_child(column)
-	return column
-
-
-func label(parent: VBoxContainer, value: String, size: int, color: Color) -> Label:
-	var result := Label.new()
-	result.text = value
-	result.add_theme_font_size_override("font_size", size)
-	result.add_theme_color_override("font_color", color)
-	parent.add_child(result)
-	return result
-
-
-func spacer(parent: VBoxContainer, height: float) -> void:
-	var empty := Control.new()
-	empty.custom_minimum_size.y = height
-	parent.add_child(empty)
-
-
-func button_style(button: Button, background: Color, foreground: Color) -> void:
-	button.add_theme_font_size_override("font_size", 15)
-	button.add_theme_color_override("font_color", foreground)
-	button.add_theme_color_override("font_disabled_color", Color("aaa4af"))
-	for state in ["normal", "hover", "pressed", "disabled"]:
-		var style := StyleBoxFlat.new()
-		style.bg_color = Color("f1edf0") if state == "disabled" else background.lightened(0.12) if state == "hover" else background.darkened(0.07) if state == "pressed" else background
-		style.set_corner_radius_all(17)
-		button.add_theme_stylebox_override(state, style)
+func _copy_code() -> void:
+	DisplayServer.clipboard_set(room_label.text)
+	status_label.text = "Room code copied."
 
 
 func request(message: Dictionary) -> void:
@@ -188,7 +134,7 @@ func request(message: Dictionary) -> void:
 	if client.connected:
 		_connected()
 	else:
-		client.connect_to_server(server_field.text.strip_edges())
+		client.connect_to_server(server_url)
 
 
 func _connected() -> void:
@@ -203,7 +149,10 @@ func _room_changed(room: Dictionary) -> void:
 	lobby.visible = not playing
 	arena.visible = playing
 	code_field.text = room.code
-	room_label.text = "Room %s  |  %s  |  map: %s" % [room.code, room.phase, room.wall_mode]
+	entry_card.hide()
+	waiting_card.show()
+	room_label.text = room.code
+	room_detail_label.text = "Room %s  |  %s  |  map: %s" % [room.code, room.phase, room.wall_mode]
 	var lines: Array[String] = []
 	for person in room.people:
 		lines.append("%s%s%s  —  Wins %d  Kills %d" % [person.name, " (host)" if person.id == room.host else "", " (offline)" if not person.connected else "", person.wins, person.kills])
@@ -289,7 +238,10 @@ func _show_error(message: String) -> void:
 func _left_room() -> void:
 	lobby.show()
 	arena.hide()
-	room_label.text = "No room yet"
+	waiting_card.hide()
+	entry_card.show()
+	room_label.text = ""
+	room_detail_label.text = "No room yet"
 	roster_label.text = ""
 	status_label.text = "Left room."
 	start_button.disabled = true

@@ -1,5 +1,6 @@
 extends SceneTree
 
+const RoomClient = preload("res://scripts/room_client.gd")
 const RoomRegistry = preload("res://scripts/room_registry.gd")
 
 var failures := 0
@@ -17,6 +18,9 @@ func _initialize() -> void:
 
 
 func run_checks(app) -> void:
+	check(RoomClient.resolve_server_url(PackedStringArray(), "") == "ws://127.0.0.1:9080", "server URL defaults to local server")
+	check(RoomClient.resolve_server_url(PackedStringArray(["--server=wss://duck.example"]), "") == "wss://duck.example", "server URL reads --server argument")
+	check(RoomClient.resolve_server_url(PackedStringArray(["--server=ws://a"]), " wss://b ") == "wss://b", "web server parameter wins")
 	check(app.lobby.find_children("*", "LineEdit", true, false).size() == 2, "entry screen hides server URL")
 	var registry = RoomRegistry.new()
 	var result: Dictionary = registry.create_room(10, "Duck")

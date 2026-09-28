@@ -11,7 +11,7 @@ func _initialize() -> void:
 
 
 func try_create() -> void:
-	app.server_field.text = "ws://127.0.0.1:19089"
+	app.server_url = "ws://127.0.0.1:19089"
 	app.request({"type": "create", "name": "Duck"})
 
 

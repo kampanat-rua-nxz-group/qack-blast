@@ -9,7 +9,7 @@ Two to four friends open the web build, enter nicknames, create or join a privat
 - A native headless Godot process hosts a WebSocket server and owns all rooms and `ArenaGame` instances. Browser exports connect as WebSocket clients. A public deployment later supplies HTTPS and a `wss://` endpoint.
 - `RoomRegistry` contains room membership, unique nicknames, host election, round lineup, disconnect deadlines, inputs, and scores. Its methods are independent of sockets so lifecycle rules can be tested directly.
 - The server accepts small JSON commands (`create`, `join`, `leave`, `map`, `start`, `input`) and sends lobby events plus authoritative snapshots at 20 Hz. A peer can affect only its own slot; only the current host can select a map or start a round.
-- A new main scene shows nickname, room code, server URL, roster, map choice, error state, and Start/Leave controls. During a round it displays the existing arena renderer with the server snapshot. Each browser controls only its own duck with WASD/Space (arrows/Enter may be aliases).
+- A new main scene shows nickname and room code entry, then a waiting lobby with the shareable room code and a copy button, roster, map choice, error state, and Start/Leave controls. During a round it displays the existing arena renderer with the server snapshot. Each browser controls only its own duck with WASD/Space (arrows/Enter may be aliases).
 
 ## Round lifecycle
 

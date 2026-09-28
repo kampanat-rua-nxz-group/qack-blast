@@ -15,6 +15,17 @@ var person_id := 0
 var room: Dictionary = {}
 var game: Dictionary = {}
 
+const DEFAULT_SERVER_URL = "ws://127.0.0.1:9080"
+
+
+static func resolve_server_url(args: PackedStringArray, web_value: String) -> String:
+	if not web_value.strip_edges().is_empty():
+		return web_value.strip_edges()
+	for arg in args:
+		if arg.begins_with("--server="):
+			return arg.trim_prefix("--server=")
+	return DEFAULT_SERVER_URL
+
 
 func connect_to_server(url: String) -> void:
 	if connected:

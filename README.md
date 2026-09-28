@@ -10,16 +10,16 @@ Use Godot 4.7.2. Start the authoritative room server in one terminal:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script scripts/server_main.gd
 ```
 
-It listens on `127.0.0.1:9080` by default. To change this, add `-- --port=9080 --bind=127.0.0.1`. Open the project in Godot and press **F5** to run a desktop client. For browser clients, install the matching Godot Web export templates, then export and serve the build:
+It listens on `127.0.0.1:9080` by default. To change this, add `-- --port=9080 --bind=127.0.0.1`. Clients connect to `ws://127.0.0.1:9080` unless given another URL: add `-- --server=<url>` to a desktop run, or `?server=<url>` to the browser address. Open the project in Godot and press **F5** to run a desktop client. For browser clients, install the matching Godot Web export templates, then export and serve the build:
 
 ```sh
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . --export-release Web build/web/index.html
 python3 -m http.server 8765 --bind 127.0.0.1 --directory build/web
 ```
 
-Open `http://127.0.0.1:8765` in separate browser windows. One player enters a nickname and creates a room; the others enter the displayed six-character code and join it. The host chooses Fixed or Random walls and starts the round once at least two players have joined. Each window controls its own duck with **WASD** or **Arrow keys** and plants a bomb with **Space** or **Enter**. The host starts the next round from the lobby after a result.
+Open `http://127.0.0.1:8765` in separate browser windows. One player enters a nickname and creates a room; the waiting lobby shows the six-character code with a copy button, and the others enter it to join. The host chooses Fixed or Random walls and starts the round once at least two players have joined. Each window controls its own duck with **WASD** or **Arrow keys** and plants a bomb with **Space** or **Enter**. The host starts the next round from the lobby after a result.
 
-The server owns the game state and sends snapshots to every client. Room codes and scores live only in server memory. A disconnected player's avatar stays in the arena for 30 seconds before it is eliminated; host rights pass to the longest-connected remaining player. New players joining during a round wait for the next one. This local setup uses plain `ws://`; hosting it on an HTTPS site needs a publicly reachable `wss://` server and an appropriate server URL in the lobby.
+The server owns the game state and sends snapshots to every client. Room codes and scores live only in server memory. A disconnected player's avatar stays in the arena for 30 seconds before it is eliminated; host rights pass to the longest-connected remaining player. New players joining during a round wait for the next one. This local setup uses plain `ws://`; hosting it on an HTTPS site needs a publicly reachable `wss://` server passed through `?server=`.
 
 ## Play locally
 
@@ -37,4 +37,4 @@ The round rules support 2–4 players, Wins/Kills, chain explosions, pickups, an
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script tests/connection_test.gd
 ```
 
-`scripts/arena_game.gd` owns the rules; `scripts/room_registry.gd` owns room membership and scores; `scripts/room_server.gd` validates network commands; and `scripts/online_app.gd` renders the lobby and snapshots.
+`scripts/arena_game.gd` owns the rules; `scripts/room_registry.gd` owns room membership and scores; `scripts/room_server.gd` validates network commands; and `scripts/online_app.gd` renders the lobby and snapshots, using the widget helpers in `scripts/lobby_ui.gd`.

@@ -7,7 +7,7 @@ Qack Blast: a 2–4 player bomb battle in Godot 4.7.2 (GDScript, GL Compatibilit
 - `scripts/arena_game.gd` — pure rules engine, runs without a scene. Put gameplay rules here.
 - `scripts/arena.gd` — local two-player scene (`scenes/arena.tscn`) on top of the rules.
 - `scripts/room_registry.gd`, `room_server.gd`, `server_main.gd` — authoritative server: rooms/scores, command validation, headless entry point.
-- `scripts/room_client.gd`, `online_app.gd`, `lobby_art.gd` — client lobby and snapshot rendering (`scenes/online.tscn`, the main scene).
+- `scripts/room_client.gd`, `online_app.gd`, `lobby_ui.gd`, `lobby_art.gd` — client lobby and snapshot rendering (`scenes/online.tscn`, the main scene).
 - `docs/superpowers/specs/` and `plans/` — design specs and implementation plans; check the relevant spec before changing behaviour.
 
 ## Conventions
