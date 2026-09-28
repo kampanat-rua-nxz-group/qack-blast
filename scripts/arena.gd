@@ -62,7 +62,7 @@ func _input(event: InputEvent) -> void:
 	if not event is InputEventKey or event.echo:
 		return
 	if event.pressed and event.keycode == KEY_M:
-		selected_wall_mode = "random" if selected_wall_mode == "fixed" else "fixed"
+		selected_wall_mode = ArenaGame.MAP_MODES[(ArenaGame.MAP_MODES.find(selected_wall_mode) + 1) % ArenaGame.MAP_MODES.size()]
 		queue_redraw()
 		return
 	var player_index := -1
@@ -91,6 +91,7 @@ func _input(event: InputEvent) -> void:
 
 func _draw() -> void:
 	var font := ThemeDB.fallback_font
+	var colors := map_colors(game.wall_mode)
 	draw_rect(Rect2(Vector2.ZERO, Vector2(960, 704)), Color("fff7ed"))
 	draw_circle(Vector2(30, 35), 104.0, Color("ffe8d9"))
 	draw_circle(Vector2(934, 678), 140.0, Color("e4f5ed"))
@@ -98,22 +99,22 @@ func _draw() -> void:
 	draw_string(font, Vector2(143, 66), "a tiny bomb battle for 2-4", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("867f91"))
 	rounded_box(Rect2(704, 24, 114, 38), Color("ffe1a6"), 19.0)
 	centered_text("%s  %dP" % ["ONLINE" if networked else "LOCAL", game.players.size()], Vector2(761, 49), 15, Color("73512d"))
-	centered_text("%s  %d:%02d" % [game.wall_mode.to_upper(), int(game.round_elapsed) / 60, int(game.round_elapsed) % 60], Vector2(635, 49), 13, Color("73512d"))
+	centered_text("%s  %d:%02d" % [ArenaGame.MAP_NAMES[game.wall_mode].to_upper(), int(game.round_elapsed) / 60, int(game.round_elapsed) % 60], Vector2(635, 49), 13, Color("73512d"))
 	if selected_wall_mode != game.wall_mode:
-		centered_text("NEXT: %s" % selected_wall_mode.to_upper(), Vector2(510, 49), 13, Color("92536b"))
-	rounded_box(Rect2(136, 76, 688, 584), Color("d8d2df"), 13.0)
+		centered_text("NEXT: %s" % ArenaGame.MAP_NAMES[selected_wall_mode].to_upper(), Vector2(500, 49), 12, Color("92536b"))
+	rounded_box(Rect2(136, 76, 688, 584), colors.frame, 13.0)
 	rounded_box(Rect2(138, 78, 684, 580), Color("fffdf6"), 11.0)
 	for y in range(game.HEIGHT):
 		for x in range(game.WIDTH):
 			var tile := Vector2i(x, y)
 			var rect := Rect2(game.ORIGIN + Vector2(x, y) * game.CELL, Vector2.ONE * game.CELL)
-			draw_rect(rect, Color("e9f7ed") if (x + y) % 2 == 0 else Color("f2faef"))
+			draw_rect(rect, colors.floor if (x + y) % 2 == 0 else colors.floor_alt)
 			if game.board[y][x] == game.WALL:
-				draw_wall(rect)
+				draw_wall(rect, colors)
 			elif game.board[y][x] == game.CRATE:
-				draw_crate(rect)
+				draw_crate(rect, colors)
 			elif (x * 7 + y * 11) % 23 == 0:
-				draw_circle(game.center(tile) + Vector2(13, -12), 2.5, Color("d3ebd8"))
+				draw_circle(game.center(tile) + Vector2(13, -12), 2.5, colors.decor)
 			if game.pickups.has(tile):
 				draw_pickup(game.center(tile), game.pickups[tile])
 			if game.is_closed(tile):
@@ -170,20 +171,30 @@ func centered_text(value: String, baseline: Vector2, size: int, color: Color) ->
 	draw_string(font, baseline - Vector2(width * 0.5, 0), value, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
 
 
-func draw_wall(rect: Rect2) -> void:
-	rounded_box(Rect2(rect.position + Vector2(0, 3), rect.size).grow(-2.0), Color("9ba6c7"), 8.0)
-	rounded_box(rect.grow(-3.0), Color("bbc8e1"), 8.0)
-	draw_line(rect.position + Vector2(11, 11), rect.position + Vector2(37, 11), Color("e4ecf7"), 3.0, true)
-	draw_circle(rect.position + Vector2(39, 35), 3.0, Color("a6b7d5"))
+func map_colors(mode: String) -> Dictionary:
+	match mode:
+		"pond":
+			return {"frame": Color("8cbca9"), "floor": Color("d8f1e6"), "floor_alt": Color("c9e9df"), "wall": Color("60aa91"), "wall_shadow": Color("397e70"), "wall_highlight": Color("a9dfbb"), "wall_dot": Color("398a78"), "crate": Color("e6be81"), "crate_shadow": Color("a77a55"), "crate_detail": Color("fff0bb"), "crate_dot": Color("a87848"), "decor": Color("6ebaa1")}
+		"frost":
+			return {"frame": Color("a5b6d4"), "floor": Color("e7f5fb"), "floor_alt": Color("d6ebf6"), "wall": Color("9dc9e8"), "wall_shadow": Color("648bb9"), "wall_highlight": Color("f3fbff"), "wall_dot": Color("77a9cf"), "crate": Color("b5a8d8"), "crate_shadow": Color("8178ad"), "crate_detail": Color("e8ddfa"), "crate_dot": Color("8f81b7"), "decor": Color("9ccde4")}
+		_:
+			return {"frame": Color("d8d2df"), "floor": Color("e9f7ed"), "floor_alt": Color("f2faef"), "wall": Color("bbc8e1"), "wall_shadow": Color("9ba6c7"), "wall_highlight": Color("e4ecf7"), "wall_dot": Color("a6b7d5"), "crate": Color("e9ad83"), "crate_shadow": Color("b97763"), "crate_detail": Color("fff1d2"), "crate_dot": Color("c67f66"), "decor": Color("d3ebd8")}
 
 
-func draw_crate(rect: Rect2) -> void:
-	rounded_box(Rect2(rect.position + Vector2(0, 3), rect.size).grow(-3.0), Color("b97763"), 9.0)
-	rounded_box(rect.grow(-4.0), Color("e9ad83"), 9.0)
-	draw_line(rect.position + Vector2(11, 14), rect.position + Vector2(40, 37), Color("fff1d2"), 5.0, true)
-	draw_line(rect.position + Vector2(40, 14), rect.position + Vector2(11, 37), Color("fff1d2"), 5.0, true)
+func draw_wall(rect: Rect2, colors: Dictionary) -> void:
+	rounded_box(Rect2(rect.position + Vector2(0, 3), rect.size).grow(-2.0), colors.wall_shadow, 8.0)
+	rounded_box(rect.grow(-3.0), colors.wall, 8.0)
+	draw_line(rect.position + Vector2(11, 11), rect.position + Vector2(37, 11), colors.wall_highlight, 3.0, true)
+	draw_circle(rect.position + Vector2(39, 35), 3.0, colors.wall_dot)
+
+
+func draw_crate(rect: Rect2, colors: Dictionary) -> void:
+	rounded_box(Rect2(rect.position + Vector2(0, 3), rect.size).grow(-3.0), colors.crate_shadow, 9.0)
+	rounded_box(rect.grow(-4.0), colors.crate, 9.0)
+	draw_line(rect.position + Vector2(11, 14), rect.position + Vector2(40, 37), colors.crate_detail, 5.0, true)
+	draw_line(rect.position + Vector2(40, 14), rect.position + Vector2(11, 37), colors.crate_detail, 5.0, true)
 	for dot in [Vector2(12, 12), Vector2(39, 12), Vector2(12, 39), Vector2(39, 39)]:
-		draw_circle(rect.position + dot, 2.0, Color("c67f66"))
+		draw_circle(rect.position + dot, 2.0, colors.crate_dot)
 
 
 func draw_pickup(pos: Vector2, kind: int) -> void:

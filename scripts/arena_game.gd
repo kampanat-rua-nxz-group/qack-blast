@@ -17,6 +17,8 @@ const CLOSE_START = 300.0
 const CLOSE_INTERVAL = 30.0
 const CLOSE_WARNING = 5.0
 const DIRECTIONS = [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
+const MAP_MODES = ["fixed", "random", "pond", "frost"]
+const MAP_NAMES = {"fixed": "Classic", "random": "Random", "pond": "Lily Pond", "frost": "Frost Garden"}
 
 var board: Array = []
 var players: Array = []
@@ -54,7 +56,14 @@ func new_round() -> void:
 		var row: Array = []
 		for x in range(WIDTH):
 			var edge := x == 0 or y == 0 or x == WIDTH - 1 or y == HEIGHT - 1
-			var pillar := wall_mode == "fixed" and x % 2 == 0 and y % 2 == 0
+			var pillar := false
+			match wall_mode:
+				"fixed":
+					pillar = x % 2 == 0 and y % 2 == 0
+				"pond":
+					pillar = (x in [4, 8] and y in [3, 5, 7]) or (x == 6 and y in [2, 5, 8]) or (y == 5 and x in [2, 10])
+				"frost":
+					pillar = x in [3, 6, 9] and y in [2, 4, 6, 8]
 			row.append(WALL if edge or pillar else OPEN)
 		board.append(row)
 	var spawns := [Vector2i(1, 1), Vector2i(WIDTH - 2, HEIGHT - 2), Vector2i(WIDTH - 2, 1), Vector2i(1, HEIGHT - 2)]

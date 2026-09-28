@@ -1,6 +1,7 @@
 extends Control
 
 const RoomClient = preload("res://scripts/room_client.gd")
+const ArenaGame = preload("res://scripts/arena_game.gd")
 const ArenaScene = preload("res://scenes/arena.tscn")
 const LobbyArt = preload("res://scripts/lobby_art.gd")
 const Ui = preload("res://scripts/lobby_ui.gd")
@@ -153,7 +154,7 @@ func _room_changed(room: Dictionary) -> void:
 	entry_card.hide()
 	waiting_card.show()
 	room_label.text = room.code
-	room_detail_label.text = "Room %s  |  %s  |  map: %s" % [room.code, room.phase, room.wall_mode]
+	room_detail_label.text = "Room %s  |  %s  |  map: %s" % [room.code, room.phase, ArenaGame.MAP_NAMES[room.wall_mode]]
 	var lines: Array[String] = []
 	for person in room.people:
 		lines.append("%s%s%s  —  Wins %d  Kills %d" % [person.name, " (host)" if person.id == room.host else "", " (offline)" if not person.connected else "", person.wins, person.kills])
@@ -227,7 +228,8 @@ func _physics_process(delta: float) -> void:
 
 
 func _change_map() -> void:
-	var mode := "random" if client.room.wall_mode == "fixed" else "fixed"
+	var modes: Array = ArenaGame.MAP_MODES
+	var mode: String = modes[(modes.find(client.room.wall_mode) + 1) % modes.size()]
 	client.send({"type": "map", "mode": mode})
 
 

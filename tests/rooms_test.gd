@@ -22,6 +22,9 @@ func _initialize() -> void:
 	var room: Dictionary = registry.rooms[code]
 	check(room.people.map(func(person): return person.name) == ["Duck", "Duck#1", "Duck#2", "Duck#3"], "duplicate nicknames get distinct suffixes")
 	check(not registry.choose_map(20, "random") and registry.choose_map(10, "random"), "only host selects the map")
+	check(registry.choose_map(10, "pond") and registry.choose_map(10, "frost"), "host can select both new maps")
+	check(not registry.choose_map(10, "unknown"), "unknown maps are rejected")
+	check(registry.choose_map(10, "random"), "host can return to random map")
 	check(not registry.start_round(20) and registry.start_round(10), "only host can start with two to four players")
 	check(room.phase == "playing" and room.game.player_count == 4 and room.game.wall_mode == "random", "round uses selected map and four players")
 	var encoded := JSON.stringify(registry.game_view(room))
