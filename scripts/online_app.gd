@@ -28,7 +28,8 @@ var input_clock := 0.0
 
 
 func _ready() -> void:
-	server_url = RoomClient.resolve_server_url(OS.get_cmdline_user_args(), web_server_param())
+	var public_url := str(ProjectSettings.get_setting("network/public_server_url", "")) if OS.has_feature("web") else ""
+	server_url = RoomClient.resolve_server_url(OS.get_cmdline_user_args(), web_server_param(), public_url)
 	arena = ArenaScene.instantiate()
 	arena.networked = true
 	add_child(arena)

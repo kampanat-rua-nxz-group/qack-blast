@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: qack-blast-server
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+  - type: web
+    name: qack-blast
+    runtime: static
+    buildCommand: bash deploy/build-web.sh
+    staticPublishPath: ./build/web
+    envVars:
+      - key: QACK_SERVER_HOST
+        fromService:
+          type: web
+          name: qack-blast-server
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
