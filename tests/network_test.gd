@@ -63,6 +63,19 @@ func _process(delta: float) -> bool:
 		4:
 			for message in inbox[1]:
 				if message.get("type") == "game" and message.bombs.size() == 1 and message.bombs[0].owner == 1:
+					var room = server.registry.rooms[room_code]
+					room.phase = "results"
+					inbox[1].clear()
+					request(1, {"type": "input", "direction": [0, 0], "plant": false})
+					request(1, {"type": "join", "code": room_code, "name": "Duck"})
+					phase = 5
+					break
+		5:
+			for message in inbox[1]:
+				if message.get("type") == "error":
+					if message.message != "Already in a room":
+						fail("late gameplay input shows an error on results: %s" % message.message)
+						return false
 					print("Network checks: 0 failure(s)")
 					server.socket.close()
 					for client in clients:

@@ -53,6 +53,8 @@ func handle(peer_id: int, message: Dictionary) -> void:
 		"":
 			pass
 	if not result.get("ok", false):
+		if kind == "input":
+			return
 		send_to(peer_id, {"type": "error", "message": str(result.get("error", "Action rejected"))})
 		return
 	if kind in ["create", "join"]:
