@@ -30,6 +30,7 @@ func _initialize() -> void:
 	test_pickup_caps()
 	test_night_vision_pickup()
 	test_night_visibility(arena)
+	test_night_spotlight(arena)
 	test_night_drops_vision()
 	test_win_and_kill_persist()
 	test_chain_kill_belongs_to_triggered_bomb()
@@ -673,6 +674,8 @@ func test_night_visibility(arena) -> void:
 	check(not arena.visible_tile(Vector2i(3, 3)), "second ring begins hidden")
 	arena.game.players[0].vision = 2
 	check(arena.visible_tile(Vector2i(3, 3)), "vision upgrade reveals second ring")
+	arena.game.players[0].vision = 3
+	check(not arena.visible_tile(Vector2i(4, 4)), "spotlight excludes distant diagonal corners")
 	arena.networked = true
 	arena.viewer_slot = 0
 	check(not arena.visible_tile(Vector2i(11, 9)), "online opponent region stays hidden")
@@ -684,6 +687,28 @@ func test_night_visibility(arena) -> void:
 	arena.networked = false
 	arena.viewer_slot = -1
 	check(arena.visible_tile(Vector2i(1, 1)) and arena.visible_tile(Vector2i(11, 9)), "local players share visible regions")
+	arena.selected_wall_mode = "fixed"
+	arena.new_round()
+
+
+func test_night_spotlight(arena) -> void:
+	arena.selected_wall_mode = "night"
+	arena.new_round()
+	arena.networked = true
+	arena.viewer_slot = 0
+	var center: Vector2 = arena.game.players[0].pos
+	var cell: float = arena.game.CELL
+	check(is_zero_approx(arena.vision_darkness(center)), "spotlight center is clear")
+	var edge: Vector2 = center + Vector2(1.65 * cell, 0)
+	var edge_darkness: float = arena.vision_darkness(edge)
+	check(edge_darkness > 0.0 and edge_darkness < 1.0, "spotlight edge fades")
+	check(is_equal_approx(arena.vision_darkness(center + Vector2(1.65, 1.65) * cell), 1.0), "spotlight is circular")
+	arena.game.players[0].vision = 2
+	check(is_zero_approx(arena.vision_darkness(edge)), "sight pickup widens spotlight")
+	arena.game.players[0].alive = false
+	check(is_zero_approx(arena.vision_darkness(edge)), "spectator sees entire map")
+	arena.networked = false
+	arena.viewer_slot = -1
 	arena.selected_wall_mode = "fixed"
 	arena.new_round()
 

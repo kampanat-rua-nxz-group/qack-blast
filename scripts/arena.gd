@@ -134,10 +134,7 @@ func _draw() -> void:
 		if game.players[i].alive:
 			draw_duck(game.players[i].pos, i, visual_facing[i], walk_phase[i])
 	if game.wall_mode == "night" and not game.round_over:
-		for y in range(game.HEIGHT):
-			for x in range(game.WIDTH):
-				if not visible_tile(Vector2i(x, y)):
-					draw_rect(Rect2(game.ORIGIN + Vector2(x, y) * game.CELL, Vector2.ONE * game.CELL), Color("111727"))
+		draw_night_vision()
 	if int(floor(game.round_elapsed * 2.0)) % 2 == 0:
 		for tile in game.warning_tiles():
 			var rect := Rect2(game.ORIGIN + Vector2(tile) * game.CELL, Vector2.ONE * game.CELL)
@@ -194,20 +191,54 @@ func map_colors(mode: String) -> Dictionary:
 
 
 func visible_tile(tile: Vector2i) -> bool:
+	return vision_darkness(game.center(tile)) < 1.0
+
+
+func vision_darkness(point: Vector2) -> float:
 	if game.wall_mode != "night" or game.round_over:
-		return true
+		return 0.0
 	if networked and (viewer_slot < 0 or not game.players[viewer_slot].alive):
-		return true
+		return 0.0
+	var darkness := 1.0
 	for i in range(game.players.size()):
 		if networked and i != viewer_slot:
 			continue
 		if not game.players[i].alive:
 			continue
-		var center_tile: Vector2i = game.tile_at(game.players[i].pos)
-		var distance: Vector2i = tile - center_tile
-		if maxi(absi(distance.x), absi(distance.y)) <= game.players[i].vision:
-			return true
-	return false
+		var radius: float = (game.players[i].vision + 0.9) * game.CELL
+		var fade_start: float = radius - game.CELL * 0.5
+		var fade: float = clampf((point.distance_to(game.players[i].pos) - fade_start) / (radius - fade_start), 0.0, 1.0)
+		darkness = minf(darkness, fade * fade * (3.0 - 2.0 * fade))
+	return darkness
+
+
+func draw_night_vision() -> void:
+	var step: float = game.CELL / 4.0
+	for y in range(game.HEIGHT):
+		for x in range(game.WIDTH):
+			var origin: Vector2 = game.ORIGIN + Vector2(x, y) * game.CELL
+			var corners := [vision_darkness(origin), vision_darkness(origin + Vector2(game.CELL, 0)), vision_darkness(origin + Vector2.ONE * game.CELL), vision_darkness(origin + Vector2(0, game.CELL)), vision_darkness(origin + Vector2.ONE * game.CELL * 0.5)]
+			if corners.max() <= 0.0:
+				continue
+			if corners.min() >= 1.0:
+				draw_rect(Rect2(origin, Vector2.ONE * game.CELL), Color("111727"))
+				continue
+			for row in range(4):
+				for column in range(4):
+					var top_left: Vector2 = origin + Vector2(column, row) * step
+					var top_right: Vector2 = top_left + Vector2(step, 0)
+					var bottom_right: Vector2 = top_left + Vector2(step, step)
+					var bottom_left: Vector2 = top_left + Vector2(0, step)
+					var alphas := [vision_darkness(top_left), vision_darkness(top_right), vision_darkness(bottom_right), vision_darkness(bottom_left)]
+					if alphas.max() <= 0.0:
+						continue
+					if alphas.min() >= 1.0:
+						draw_rect(Rect2(top_left, Vector2.ONE * step), Color("111727"))
+						continue
+					var colors := PackedColorArray()
+					for alpha in alphas:
+						colors.append(Color(Color("111727"), alpha))
+					draw_polygon(PackedVector2Array([top_left, top_right, bottom_right, bottom_left]), colors)
 
 
 func draw_wall(rect: Rect2, colors: Dictionary) -> void:
