@@ -42,6 +42,7 @@ var danger_waves := 0
 var next_danger_at := DANGER_START
 var next_hazard_at := SUDDEN_DEATH_START
 var hazard_waves := 0
+var next_night_shuffle_at := 60.0
 var scores := [{"wins": 0, "kills": 0}, {"wins": 0, "kills": 0}]
 var round_over := false
 var result := ""
@@ -72,6 +73,7 @@ func new_round() -> void:
 	next_danger_at = DANGER_START
 	next_hazard_at = SUDDEN_DEATH_START
 	hazard_waves = 0
+	next_night_shuffle_at = 60.0
 	for y in range(HEIGHT):
 		var row: Array = []
 		var terrain_row: Array = []
@@ -322,6 +324,47 @@ func schedule_hazards(previous_elapsed: float) -> void:
 					tiles.append(Vector2i(x, y))
 			hazards.append({"kind": "blizzard", "tiles": tiles, "time": next_hazard_at + HAZARD_WARNING - previous_elapsed})
 			next_hazard_at += HAZARD_INTERVAL
+	elif wall_mode == "night":
+		while next_night_shuffle_at < SUDDEN_DEATH_START and round_elapsed >= next_night_shuffle_at:
+			reshuffle_night_walls()
+			next_night_shuffle_at += 60.0
+		while round_elapsed >= next_hazard_at:
+			var ring: int = hazard_waves + 1
+			hazard_waves += 1
+			var tiles: Array[Vector2i] = []
+			for y in range(1, HEIGHT - 1):
+				for x in range(1, WIDTH - 1):
+					if mini(mini(x, WIDTH - 1 - x), mini(y, HEIGHT - 1 - y)) == ring:
+						tiles.append(Vector2i(x, y))
+			hazards.append({"kind": "closing_walls", "tiles": tiles, "time": next_hazard_at + HAZARD_WARNING - previous_elapsed})
+			next_hazard_at += HAZARD_INTERVAL
+
+
+func reshuffle_night_walls() -> void:
+	for y in range(1, HEIGHT - 1):
+		for x in range(1, WIDTH - 1):
+			if board[y][x] == WALL:
+				board[y][x] = OPEN
+	for y in range(1, HEIGHT - 1):
+		for x in range(1, WIDTH - 1):
+			var tile := Vector2i(x, y)
+			if board[y][x] != OPEN or rng.randf() >= 0.25:
+				continue
+			var protected := pickups.has(tile)
+			for bomb in bombs:
+				if bomb.tile == tile:
+					protected = true
+			for flame in flames:
+				if flame.tile == tile:
+					protected = true
+			for i in range(players.size()):
+				if players[i].alive and (overlaps_tile(players[i].pos, tile) or (move_targets[i] != Vector2.ZERO and tile_at(move_targets[i]) == tile)):
+					protected = true
+			if protected:
+				continue
+			board[y][x] = WALL
+			if not open_tiles_connected():
+				board[y][x] = OPEN
 
 
 func resolve_hazard(hazard: Dictionary) -> void:
@@ -345,6 +388,18 @@ func resolve_hazard(hazard: Dictionary) -> void:
 			for i in range(players.size()):
 				if players[i].alive and overlaps_tile(players[i].pos, tile):
 					players[i].alive = false
+	elif hazard.kind == "closing_walls":
+		for tile in hazard.tiles:
+			board[tile.y][tile.x] = WALL
+			pickups.erase(tile)
+			for bomb in bombs.duplicate():
+				if bomb.tile == tile:
+					bombs.erase(bomb)
+			for i in range(players.size()):
+				if players[i].alive and overlaps_tile(players[i].pos, tile):
+					players[i].alive = false
+				if move_targets[i] != Vector2.ZERO and tile_at(move_targets[i]) == tile:
+					move_targets[i] = Vector2.ZERO
 
 
 func schedule_danger_bombs(previous_elapsed: float) -> void:

@@ -66,6 +66,8 @@ func run_checks(app) -> void:
 		check(app.arena.game.hazards.size() == 1 and app.arena.game.warning_tiles().has(Vector2i(2, 2)), "online snapshot restores map hazard warnings")
 	room.game.bombs.erase(danger_bomb)
 	room.game.players[0].alive = false
+	app.client.accept(registry.game_view(room))
+	check(app.arena.visible_tile(Vector2i(11, 9)), "eliminated online viewer sees full night map")
 	room.game.resolve_round()
 	room.phase = "results"
 	app.client.accept(registry.room_view(room))

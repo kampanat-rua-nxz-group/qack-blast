@@ -53,6 +53,7 @@ func _initialize() -> void:
 	test_scene_accepts_four_player_state(arena)
 	test_wall_modes()
 	test_night_wall_layout()
+	test_night_wall_reshuffle_and_closure()
 	test_map_themes(arena)
 	test_wall_selection_applies_next_round(arena)
 	test_danger_bomb_waves()
@@ -419,6 +420,48 @@ func test_night_wall_layout() -> void:
 		for player in game.players:
 			check(reachable.has(game.tile_at(player.pos)), "night seed %d connects every spawn" % seed_value)
 	check(layouts.size() > 1, "night obstacles reroll each round")
+
+
+func test_night_wall_reshuffle_and_closure() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "night"
+	game.rng.seed = 13
+	game.new_round()
+	clear_crates(game)
+	game.players[0].pos = game.center(Vector2i(2, 1)) + Vector2(18, 0)
+	game.move_targets[0] = game.center(Vector2i(3, 1))
+	game.board[1][2] = game.OPEN
+	game.board[1][3] = game.OPEN
+	game.board[1][4] = game.OPEN
+	game.board[1][5] = game.OPEN
+	game.bombs.append({"tile": Vector2i(4, 1), "owner": 0, "range": 1, "time": 90.0})
+	game.pickups[Vector2i(5, 1)] = game.PICKUP_VISION
+	var before: String = wall_mask(game)
+	game.round_elapsed = 59.9
+	game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.get("next_night_shuffle_at") != null, "night schedules minute wall reshuffles")
+	if game.get("next_night_shuffle_at") == null:
+		return
+	check(game.next_night_shuffle_at == 120.0 and wall_mask(game) != before, "night walls change at one minute")
+	for protected_tile in [Vector2i(2, 1), Vector2i(3, 1), Vector2i(4, 1), Vector2i(5, 1)]:
+		check(game.board[protected_tile.y][protected_tile.x] != game.WALL, "night reshuffle protects movement, bombs, and pickups")
+	var reachable := reachable_open_tiles(game, game.tile_at(game.players[0].pos))
+	check(reachable.has(game.tile_at(game.players[1].pos)), "night reshuffle keeps players connected")
+	game.round_elapsed = 120.0
+	game.schedule_hazards(120.0)
+	check(game.next_night_shuffle_at == 180.0, "night reshuffles again at two minutes")
+	game.round_elapsed = 180.0
+	game.schedule_hazards(180.0)
+	check(game.bombs.size() == 1 and game.hazards.size() == 1 and game.hazards[0].kind == "closing_walls", "night sudden death warns walls without danger bombs")
+	var closing_game = load("res://scripts/arena_game.gd").new()
+	closing_game.wall_mode = "night"
+	closing_game.new_round()
+	var spawn: Vector2i = closing_game.tile_at(closing_game.players[0].pos)
+	closing_game.hazards.append({"kind": "closing_walls", "tiles": [spawn], "time": 5.0})
+	closing_game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(closing_game.players[0].alive and closing_game.warning_tiles().has(spawn), "closing wall warns before striking")
+	closing_game.step(4.9, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(closing_game.board[spawn.y][spawn.x] == closing_game.WALL and not closing_game.players[0].alive, "closing wall persists and eliminates duck")
 
 
 func test_map_themes(arena) -> void:
