@@ -33,6 +33,11 @@ func run_checks(app) -> void:
 	check(app.room_label.text == result.code, "waiting lobby shows shareable room code")
 	check(app.lobby.find_child("CopyCodeButton", true, false) != null, "waiting lobby has copy code button")
 	registry.join_room(20, result.code, "Duck")
+	var lobby_room: Dictionary = registry.rooms[result.code]
+	lobby_room.people[0].scores.wins = 3
+	lobby_room.people[1].scores.kills = 2
+	app.client.accept(registry.room_view(lobby_room))
+	check(app.roster_label.text.contains("Duck") and not app.roster_label.text.contains("Wins") and not app.roster_label.text.contains("Kills"), "waiting roster omits scores")
 	check(registry.choose_map(10, "night"), "host can select night map")
 	registry.start_round(10)
 	var room: Dictionary = registry.rooms[result.code]
