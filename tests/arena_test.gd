@@ -33,6 +33,7 @@ func _initialize() -> void:
 	test_night_spotlight(arena)
 	test_night_drops_vision()
 	test_random_mystery_and_bursts()
+	test_random_burst_chain()
 	test_win_and_kill_persist()
 	test_chain_kill_belongs_to_triggered_bomb()
 	test_closer_blast_gets_kill()
@@ -768,6 +769,19 @@ func test_random_mystery_and_bursts() -> void:
 	game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
 	check(not game.players[0].alive and game.players[1].alive, "random burst eliminates only marked duck")
 	check(game.result == "PLAYER 2 WINS", "random burst resolves to sole survivor")
+
+
+func test_random_burst_chain() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "random"
+	game.new_round()
+	clear_crates(game)
+	game.board[3][3] = game.CRATE
+	game.bombs.append({"tile": Vector2i(3, 4), "owner": 0, "range": 1, "time": 2.0})
+	game.hazards.append({"kind": "random_burst", "tiles": [Vector2i(3, 3), Vector2i(3, 4)], "time": 0.1})
+	game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.board[3][3] == game.OPEN, "random burst clears a marked crate")
+	check(game.bombs.is_empty() and has_flame(game, Vector2i(3, 4), 0), "random burst triggers the bomb on a marked tile")
 
 
 func clear_crates(game) -> void:
