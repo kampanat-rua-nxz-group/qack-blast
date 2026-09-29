@@ -259,6 +259,11 @@ func draw_crate(rect: Rect2, colors: Dictionary) -> void:
 
 func draw_pickup(pos: Vector2, kind: int) -> void:
 	draw_circle(pos + Vector2(0, 3), 17.0, Color("b5cbbd"))
+	if kind == game.PICKUP_MYSTERY:
+		draw_circle(pos, 17.0, Color("f4accb"))
+		draw_circle(pos, 12.0, Color("ffe4f0"))
+		centered_text("?", pos + Vector2(0, 7), 21, Color("944d75"))
+		return
 	if kind == game.PICKUP_VISION:
 		draw_circle(pos, 17.0, Color("a2dbef"))
 		draw_circle(pos, 12.0, Color("e3f8ff"))

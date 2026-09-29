@@ -32,6 +32,7 @@ func _initialize() -> void:
 	test_night_visibility(arena)
 	test_night_spotlight(arena)
 	test_night_drops_vision()
+	test_random_mystery_and_bursts()
 	test_win_and_kill_persist()
 	test_chain_kill_belongs_to_triggered_bomb()
 	test_closer_blast_gets_kill()
@@ -732,6 +733,41 @@ func test_night_drops_vision() -> void:
 		if found_vision:
 			break
 	check(found_vision, "night map can drop vision items")
+
+
+func test_random_mystery_and_bursts() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "random"
+	game.rng.seed = 4
+	game.new_round()
+	clear_crates(game)
+	var spawn: Vector2i = game.tile_at(game.players[0].pos)
+	game.players[0].bomb_limit = 5
+	game.players[0].range = 2
+	game.pickups[spawn] = 3
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.players[0].range == 3 and not game.pickups.has(spawn), "mystery chooses the uncapped upgrade")
+	game.players[0].range = 6
+	game.pickups[spawn] = 3
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.players[0].range == 6 and game.players[0].bomb_limit == 5 and not game.pickups.has(spawn), "capped mystery item is consumed")
+	game.round_elapsed = 180.0
+	game.schedule_hazards(180.0)
+	check(game.hazards.size() == 1 and game.hazards[0].tiles.size() == 1, "random first wave warns one tile")
+	game.round_elapsed = 195.0
+	game.schedule_hazards(195.0)
+	check(game.hazards.size() == 2 and game.hazards[1].tiles.size() == 2, "random second wave warns two tiles")
+	game.round_elapsed = 210.0
+	game.schedule_hazards(210.0)
+	check(game.hazards.size() == 3 and game.hazards[2].tiles.size() == 4, "random third wave warns four tiles")
+	game.hazards.clear()
+	game.round_elapsed = 0.0
+	game.players[0].pos = game.center(Vector2i(1, 1))
+	game.players[1].pos = game.center(Vector2i(11, 9))
+	game.hazards.append({"kind": "random_burst", "tiles": [Vector2i(1, 1)], "time": 0.1})
+	game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(not game.players[0].alive and game.players[1].alive, "random burst eliminates only marked duck")
+	check(game.result == "PLAYER 2 WINS", "random burst resolves to sole survivor")
 
 
 func clear_crates(game) -> void:

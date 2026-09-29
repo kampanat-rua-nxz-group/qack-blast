@@ -14,6 +14,7 @@ const OPEN = 0
 const PICKUP_BOMB_CAPACITY = 0
 const PICKUP_BLAST_RANGE = 1
 const PICKUP_VISION = 2
+const PICKUP_MYSTERY = 3
 const SUDDEN_DEATH_START = 180.0
 const HAZARD_INTERVAL = 15.0
 const HAZARD_WARNING = 5.0
@@ -35,6 +36,8 @@ var wall_mode := "fixed"
 var round_elapsed := 0.0
 var danger_waves := 0
 var next_danger_at := DANGER_START
+var next_hazard_at := SUDDEN_DEATH_START
+var hazard_waves := 0
 var scores := [{"wins": 0, "kills": 0}, {"wins": 0, "kills": 0}]
 var round_over := false
 var result := ""
@@ -59,6 +62,8 @@ func new_round() -> void:
 	round_elapsed = 0.0
 	danger_waves = 0
 	next_danger_at = DANGER_START
+	next_hazard_at = SUDDEN_DEATH_START
+	hazard_waves = 0
 	for y in range(HEIGHT):
 		var row: Array = []
 		for x in range(WIDTH):
@@ -225,6 +230,13 @@ func step(delta: float, directions: Array, plant_requests: Array) -> void:
 					players[i].range = mini(players[i].range + 1, 6)
 				PICKUP_VISION:
 					players[i].vision += 1
+				PICKUP_MYSTERY:
+					var can_add_bomb: bool = players[i].bomb_limit < 5
+					var can_add_range: bool = players[i].range < 6
+					if can_add_bomb and (not can_add_range or rng.randi_range(0, 1) == 0):
+						players[i].bomb_limit += 1
+					elif can_add_range:
+						players[i].range += 1
 			pickups.erase(tile)
 		var closest_distance := 1_000_000
 		var closest_owner := -1
@@ -247,10 +259,32 @@ func step(delta: float, directions: Array, plant_requests: Array) -> void:
 func schedule_hazards(previous_elapsed: float) -> void:
 	if wall_mode == "fixed":
 		schedule_danger_bombs(previous_elapsed)
+	elif wall_mode == "random":
+		while round_elapsed >= next_hazard_at:
+			hazard_waves += 1
+			var available: Array[Vector2i] = []
+			for y in range(1, HEIGHT - 1):
+				for x in range(1, WIDTH - 1):
+					if board[y][x] == OPEN:
+						available.append(Vector2i(x, y))
+			var tiles: Array[Vector2i] = []
+			for i in range(mini(1 << (hazard_waves - 1), available.size())):
+				tiles.append(available.pop_at(rng.randi_range(0, available.size() - 1)))
+			hazards.append({"kind": "random_burst", "tiles": tiles, "time": next_hazard_at + HAZARD_WARNING - previous_elapsed})
+			next_hazard_at += HAZARD_INTERVAL
 
 
-func resolve_hazard(_hazard: Dictionary) -> void:
-	pass
+func resolve_hazard(hazard: Dictionary) -> void:
+	if hazard.kind == "random_burst":
+		var triggered: Array = []
+		for tile in hazard.tiles:
+			blast_cell(tile, -1, 0, triggered)
+			if board[tile.y][tile.x] == CRATE:
+				board[tile.y][tile.x] = OPEN
+		for bomb in triggered:
+			bomb.time = 0.0
+		if not triggered.is_empty():
+			update_bombs(0.0)
 
 
 func schedule_danger_bombs(previous_elapsed: float) -> void:
@@ -391,7 +425,7 @@ func update_bombs(delta: float) -> void:
 					break
 	for tile in destroyed_crates:
 		if rng.randf() < 0.2:
-			pickups[tile] = rng.randi_range(0, 2 if wall_mode == "night" else 1)
+			pickups[tile] = rng.randi_range(0, 2 if wall_mode == "night" else 3 if wall_mode == "random" else 1)
 
 
 func blast_cell(tile: Vector2i, bomb_owner: int, distance: int, queue: Array) -> void:
