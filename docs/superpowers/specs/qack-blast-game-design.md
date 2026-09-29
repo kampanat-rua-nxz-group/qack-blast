@@ -12,7 +12,7 @@ A classic competitive bomb-placing game for 2–4 friends, played online in a we
 2. Before the round, the host chooses Classic, Random, Lily Pond, or Frost Garden, then starts once 2–4 players are present. Each player spawns at a different point with an exit route from the spawn.
 3. Players explore, plant bombs to destroy walls, collect items, and try to eliminate opponents.
 4. Eliminated players become spectators. The last survivor wins. If the final survivors are eliminated at the same moment, the round is a draw.
-5. The round result and scoreboard are shown, then everyone returns to the same lobby to start the next round.
+5. The round result and leaderboard appear in a separate in-room results scene. The host can change the map or start the next round there, and everyone moves directly back into the arena.
 
 ## Movement and Map
 
