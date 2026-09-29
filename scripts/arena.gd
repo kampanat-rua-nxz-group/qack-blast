@@ -11,6 +11,7 @@ var walk_phase := [0.0, 0.0]
 var selected_wall_mode := "fixed"
 var networked := false
 var viewer_slot := -1
+var player_names: Array[String] = []
 
 
 func _ready() -> void:
@@ -185,11 +186,11 @@ func _draw() -> void:
 		rounded_box(Rect2(273, panel_y + 5, 414, 356 if large_result else 242), Color("b4a5b8"), 25.0)
 		rounded_box(Rect2(269, panel_y, 414, 356 if large_result else 242), Color("fffaf0"), 25.0)
 		centered_text("ROUND OVER", Vector2(476, panel_y + 38), 16, Color("aa8a89"))
-		centered_text("IT'S A DRAW!" if game.result == "DRAW" else game.result + "!", Vector2(476, panel_y + 88), 32, Color("403d57"))
+		centered_text("IT'S A DRAW!" if game.result == "DRAW" else round_result_text() + "!", Vector2(476, panel_y + 88), 32, Color("403d57"))
 		var ranked := game.score_order()
 		for rank in range(ranked.size()):
 			var i: int = ranked[rank]
-			centered_text("%d. PLAYER %d    WINS %d    KILLS %d" % [rank + 1, i + 1, game.scores[i].wins, game.scores[i].kills], Vector2(476, panel_y + 107 + rank * 23), 13, Color("403d57"))
+			centered_text("%d. %s    WINS %d    KILLS %d" % [rank + 1, player_label(i), game.scores[i].wins, game.scores[i].kills], Vector2(476, panel_y + 107 + rank * 23), 13, Color("403d57"))
 		rounded_box(Rect2(352, button_y, 248, 36), Color("ffe1a6"), 18.0)
 		centered_text("RETURN TO ROOM" if networked else "PRESS R TO PLAY AGAIN", Vector2(476, button_y + 24), 16, Color("73512d"))
 
@@ -205,6 +206,20 @@ func centered_text(value: String, baseline: Vector2, size: int, color: Color) ->
 	var font := ThemeDB.fallback_font
 	var width := font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	draw_string(font, baseline - Vector2(width * 0.5, 0), value, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+
+
+func player_label(i: int) -> String:
+	if networked and i < player_names.size() and not player_names[i].is_empty():
+		return player_names[i]
+	return "PLAYER %d" % (i + 1)
+
+
+func round_result_text() -> String:
+	if game.result.begins_with("PLAYER ") and game.result.ends_with(" WINS"):
+		var slot: int = game.result.trim_prefix("PLAYER ").trim_suffix(" WINS").to_int() - 1
+		if slot >= 0 and slot < game.players.size():
+			return "%s WINS" % player_label(slot)
+	return game.result
 
 
 func map_colors(mode: String) -> Dictionary:
@@ -372,7 +387,11 @@ func draw_player_card(i: int) -> void:
 	rounded_box(Rect2(x, y, 120, card_height), Color("fffdf7"), 17.0)
 	rounded_box(Rect2(x + 8, y + 8, 104, 53 if compact else 65), tint, 12.0)
 	draw_duck(Vector2(x + 60, y + (33 if compact else 40)), i)
-	centered_text("PLAYER %d" % (i + 1), Vector2(x + 60, y + (84 if compact else 101)), 17, Color("403d57"))
+	var name := player_label(i)
+	var name_size := 17
+	while ThemeDB.fallback_font.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1, name_size).x > 108.0 and name_size > 9:
+		name_size -= 1
+	centered_text(name, Vector2(x + 60, y + (84 if compact else 101)), name_size, Color("403d57"))
 	centered_text("READY!" if game.players[i].alive else "OUT!", Vector2(x + 60, y + (105 if compact else 122)), 13, Color("5f9b80") if game.players[i].alive else Color("c77c83"))
 	centered_text("BOMB %d   FIRE %d" % [game.players[i].bomb_limit, game.players[i].range], Vector2(x + 60, y + (130 if compact else 149)), 12, Color("827b8b"))
 	if game.wall_mode == "night":

@@ -39,6 +39,7 @@ func run_checks(app) -> void:
 	app.client.accept(registry.room_view(room))
 	app.client.accept(registry.game_view(room))
 	check(app.arena.visible and not app.lobby.visible, "online scene displays arena during round")
+	check(app.arena.player_label(0) == "Duck" and app.arena.player_label(1) == "Duck#1", "arena cards show joined nicknames by slot")
 	check(app.arena.game.players.size() == 2 and app.arena.game.board.size() == 11, "scene receives server snapshot")
 	check(app.arena.game.tile_at(app.arena.game.players[1].pos) == Vector2i(11, 9), "snapshot restores player positions")
 	check(app.arena.game.wall_mode == "night" and app.arena.game.players[0].vision == 1, "night vision arrives in server snapshot")
@@ -72,7 +73,8 @@ func run_checks(app) -> void:
 	room.phase = "results"
 	app.client.accept(registry.room_view(room))
 	app.client.accept(registry.game_view(room))
-	check(app.lobby.visible and app.status_label.text.contains("PLAYER 2 WINS"), "result returns to lobby with winner")
+	check(app.lobby.visible and app.status_label.text.contains("Duck#1 WINS"), "result returns to lobby with winner nickname")
+	check(app.arena.round_result_text() == "Duck#1 WINS", "arena result shows winner nickname")
 	for peer_id in [30, 40, 50, 60]:
 		check(registry.join_room(peer_id, result.code, "Duck").ok, "another player joins before six-player rematch")
 	check(registry.start_round(10), "host starts six-player rematch")
@@ -80,6 +82,7 @@ func run_checks(app) -> void:
 	app.client.accept(registry.game_view(room))
 	check(app.arena.game.board.size() == 13 and app.arena.game.board[0].size() == 15, "six-player snapshot uses enlarged board")
 	check(app.arena.game.players.size() == 6 and app.arena.game.tile_at(app.arena.game.players[5].pos) == Vector2i(7, 11), "sixth player reaches client with lower spawn")
+	check(app.arena.player_label(5) == "Duck#5", "rematch cards follow the new six-player lineup")
 	finish()
 
 
