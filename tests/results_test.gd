@@ -27,6 +27,7 @@ func run_checks(results) -> void:
 	results.present(room, {"round_over": false, "result": "PLAYER 1 WINS"}, 1)
 	await process_frame
 	check(results.find_child("ResultsCard", true, false).get_global_rect().end.y <= 664.0, "results card fits above footer")
+	check(results.find_child("Outcome", true, false).get_global_rect().get_center().x > results.find_child("RoomCode", true, false).get_global_rect().get_center().x, "round result stands to the right of room details")
 	check(results.find_child("RoomCode", true, false).text == "QACK42", "results show room code")
 	check(results.find_child("Outcome", true, false).text == "Round complete", "results wait for final game snapshot")
 	check(results.find_child("SelectedMap", true, false).text.contains("Nightfall"), "results show selected map")

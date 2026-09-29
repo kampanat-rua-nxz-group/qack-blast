@@ -28,17 +28,42 @@ func _ready() -> void:
 	add_child(art)
 	var column := Ui.card(self, "ResultsCard", Vector2(142, 108), Vector2(676, 536), 22)
 	Ui.label(column, "ROUND RESULTS", 22, Ui.NAVY)
-	outcome_label = Ui.label(column, "Round complete", 30, Ui.NAVY)
-	outcome_label.name = "Outcome"
+	var summary := HBoxContainer.new()
+	summary.add_theme_constant_override("separation", 18)
+	column.add_child(summary)
+	var details := VBoxContainer.new()
+	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	details.add_theme_constant_override("separation", 12)
+	summary.add_child(details)
 	var code_row := HBoxContainer.new()
 	code_row.add_theme_constant_override("separation", 16)
-	column.add_child(code_row)
+	details.add_child(code_row)
 	room_code_label = _text(code_row, "", "RoomCode", 22, Ui.NAVY)
 	var copy_button := Ui.button(code_row, "COPY CODE", 36, Color("e7f2ed"), Color("366b68"))
 	copy_button.name = "CopyCodeButton"
 	copy_button.pressed.connect(_copy_code)
-	map_label = Ui.label(column, "", 16, Ui.NAVY)
+	map_label = Ui.label(details, "", 16, Ui.NAVY)
 	map_label.name = "SelectedMap"
+	var result_panel := PanelContainer.new()
+	result_panel.name = "ResultHighlight"
+	result_panel.custom_minimum_size = Vector2(300, 126)
+	var result_style := StyleBoxFlat.new()
+	result_style.bg_color = Color("f7e6ae")
+	result_style.border_color = Color("e8cf7d")
+	result_style.set_border_width_all(2)
+	result_style.set_corner_radius_all(18)
+	result_style.set_content_margin_all(14)
+	result_panel.add_theme_stylebox_override("panel", result_style)
+	summary.add_child(result_panel)
+	var result_content := VBoxContainer.new()
+	result_content.alignment = BoxContainer.ALIGNMENT_CENTER
+	result_panel.add_child(result_content)
+	var result_caption := Ui.label(result_content, "ROUND RESULT", 13, Color("73512d"))
+	result_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	outcome_label = Ui.label(result_content, "Round complete", 32, Ui.NAVY)
+	outcome_label.name = "Outcome"
+	outcome_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	outcome_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var headings := HBoxContainer.new()
 	column.add_child(headings)
 	_add_score_cells(headings, "#", "PLAYER", "WINS", "KILLS")
