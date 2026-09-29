@@ -36,6 +36,8 @@ func _initialize() -> void:
 	test_random_burst_chain()
 	test_map_specific_pickup_drops()
 	test_pond_water_speed_and_flood()
+	test_frost_ice_and_bomb_kick()
+	test_frost_blizzard()
 	test_win_and_kill_persist()
 	test_chain_kill_belongs_to_triggered_bomb()
 	test_closer_blast_gets_kill()
@@ -788,7 +790,7 @@ func test_random_burst_chain() -> void:
 
 func test_map_specific_pickup_drops() -> void:
 	var game = load("res://scripts/arena_game.gd").new()
-	for mode in ["random", "pond"]:
+	for mode in ["random", "pond", "frost"]:
 		game.wall_mode = mode
 		var found_special := false
 		for seed_value in range(100):
@@ -800,8 +802,9 @@ func test_map_specific_pickup_drops() -> void:
 			var kind: int = game.pickups.get(Vector2i(2, 1), -1)
 			if kind < 0:
 				continue
-			check(kind in ([0, 1, 3] if mode == "random" else [0, 1, 4]), "%s only drops its own special item" % mode)
-			if kind == (3 if mode == "random" else 4):
+			var special: int = 3 if mode == "random" else 4 if mode == "pond" else 5
+			check(kind in [0, 1, special], "%s only drops its own special item" % mode)
+			if kind == special:
 				found_special = true
 		check(found_special, "%s can drop its special item" % mode)
 
@@ -840,6 +843,64 @@ func test_pond_water_speed_and_flood() -> void:
 	for player in game.players:
 		var tile: Vector2i = game.tile_at(player.pos)
 		check(game.terrain[tile.y][tile.x] == 0, "large pond spawns stay dry")
+
+
+func test_frost_ice_and_bomb_kick() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "frost"
+	game.new_round()
+	clear_crates(game)
+	game.board[1][3] = game.OPEN
+	game.terrain[1][2] = 2
+	game.move_player(0, 0.3, Vector2.RIGHT)
+	check(game.move_targets[0] == game.center(Vector2i(3, 1)), "ice queues one extra tile of sliding")
+	game.move_player(0, 0.3, Vector2.ZERO)
+	check(game.players[0].pos == game.center(Vector2i(3, 1)) and game.move_targets[0] == Vector2.ZERO, "ice slide stops after one extra tile")
+	game.players[0].pos = game.center(Vector2i(1, 1))
+	game.move_targets[0] = Vector2.ZERO
+	game.terrain[1][2] = 0
+	game.board[1][3] = game.OPEN
+	game.board[1][4] = game.OPEN
+	game.board[1][5] = game.OPEN
+	game.board[1][6] = game.WALL
+	game.bombs.append({"tile": Vector2i(2, 1), "owner": 1, "range": 1, "time": 2.0})
+	game.start_move(0, Vector2.RIGHT)
+	check(game.bombs[0].tile == Vector2i(2, 1), "duck without kick cannot move bomb")
+	game.players[0].can_kick = true
+	game.start_move(0, Vector2.RIGHT)
+	check(game.bombs[0].tile == Vector2i(3, 1), "kick starts bomb moving toward wall")
+	game.update_moving_bombs(1.0)
+	check(game.bombs[0].tile == Vector2i(5, 1) and game.bombs[0].owner == 1, "kicked bomb stops at last open tile before wall")
+	game.bombs[0].tile = Vector2i(3, 1)
+	game.bombs[0].time = 0.2
+	game.bombs[0].kick_direction = Vector2i.RIGHT
+	game.bombs[0].kick_progress = 0.0
+	game.step(0.2, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.bombs.is_empty() and has_flame(game, Vector2i(3, 1), 1), "moving bomb explodes at current tile when fuse ends")
+	for blocker in [game.CRATE, game.WALL]:
+		game.bombs = [{"tile": Vector2i(3, 1), "owner": 0, "range": 1, "time": 2.0}]
+		game.board[1][4] = blocker
+		check(not game.try_kick_bomb(Vector2i(3, 1), Vector2i.RIGHT) and game.bombs[0].tile == Vector2i(3, 1), "bomb kick stops before wall or crate")
+	game.board[1][4] = game.OPEN
+	game.bombs.append({"tile": Vector2i(4, 1), "owner": 1, "range": 1, "time": 2.0})
+	check(not game.try_kick_bomb(Vector2i(3, 1), Vector2i.RIGHT), "bomb kick stops before another bomb")
+	game.bombs = [{"tile": Vector2i(3, 1), "owner": -1, "range": 0, "time": 2.0, "danger": true}]
+	check(not game.try_kick_bomb(Vector2i(3, 1), Vector2i.RIGHT), "danger bomb cannot be kicked")
+
+
+func test_frost_blizzard() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "frost"
+	game.new_round()
+	game.round_elapsed = 180.0
+	game.schedule_hazards(180.0)
+	check(game.hazards.size() == 1 and game.hazards[0].kind == "blizzard", "frost warns blizzard at three minutes")
+	game.hazards.clear()
+	game.round_elapsed = 0.0
+	var spawn: Vector2i = game.tile_at(game.players[0].pos)
+	game.hazards.append({"kind": "blizzard", "tiles": [spawn], "time": 0.1})
+	game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(not game.players[0].alive and game.players[1].alive, "blizzard strike eliminates duck on warned row")
 
 
 func clear_crates(game) -> void:

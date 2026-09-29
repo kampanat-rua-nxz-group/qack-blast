@@ -114,6 +114,8 @@ func _draw() -> void:
 				draw_rect(rect, Color("3b88b3"))
 			elif game.terrain[y][x] == 1:
 				draw_rect(rect.grow(-3.0), Color("92d9dd"))
+			elif game.terrain[y][x] == 2:
+				draw_rect(rect.grow(-3.0), Color("c5e9f7"))
 			if game.board[y][x] == game.WALL:
 				draw_wall(rect, colors)
 			elif game.board[y][x] == game.CRATE:
@@ -124,7 +126,8 @@ func _draw() -> void:
 				draw_pickup(game.center(tile), game.pickups[tile])
 	for bomb in game.bombs:
 		if not bomb.get("danger", false):
-			draw_bomb(game.center(bomb.tile), bomb.time)
+			var kick_direction: Vector2i = bomb.get("kick_direction", Vector2i.ZERO)
+			draw_bomb(game.center(bomb.tile) + Vector2(kick_direction) * game.CELL * bomb.get("kick_progress", 0.0), bomb.time)
 	var flame_owners := {}
 	for flame in game.flames:
 		if not flame_owners.has(flame.tile):
@@ -272,6 +275,12 @@ func draw_pickup(pos: Vector2, kind: int) -> void:
 		draw_circle(pos, 17.0, Color("88dbac"))
 		draw_circle(pos, 12.0, Color("ddffe9"))
 		draw_line(pos + Vector2(-7, 4), pos + Vector2(7, -4), Color("438566"), 4.0, true)
+		return
+	if kind == game.PICKUP_BOMB_KICK:
+		draw_circle(pos, 17.0, Color("a9d6f2"))
+		draw_circle(pos, 12.0, Color("e5f6ff"))
+		draw_circle(pos + Vector2(-4, 0), 5.0, Color("49799c"))
+		draw_line(pos + Vector2(2, 0), pos + Vector2(9, 0), Color("49799c"), 3.0, true)
 		return
 	if kind == game.PICKUP_VISION:
 		draw_circle(pos, 17.0, Color("a2dbef"))

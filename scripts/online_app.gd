@@ -180,11 +180,12 @@ func _game_changed(snapshot: Dictionary) -> void:
 	game.terrain = snapshot.get("terrain", [])
 	game.players.clear()
 	for player in snapshot.players:
-		game.players.append({"pos": Vector2(player.pos[0], player.pos[1]), "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.get("speed_bonus", 0.0), "facing": player.facing})
+		game.players.append({"pos": Vector2(player.pos[0], player.pos[1]), "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.get("speed_bonus", 0.0), "can_kick": player.get("can_kick", false), "facing": player.facing})
 	game.player_count = game.players.size()
 	game.bombs.clear()
 	for bomb in snapshot.bombs:
-		game.bombs.append({"tile": Vector2i(bomb.tile[0], bomb.tile[1]), "owner": bomb.owner, "time": bomb.time, "danger": bomb.get("danger", false)})
+		var kick_direction: Array = bomb.get("kick_direction", [0, 0])
+		game.bombs.append({"tile": Vector2i(bomb.tile[0], bomb.tile[1]), "owner": bomb.owner, "time": bomb.time, "danger": bomb.get("danger", false), "kick_direction": Vector2i(kick_direction[0], kick_direction[1]), "kick_progress": bomb.get("kick_progress", 0.0)})
 	game.hazards.clear()
 	for hazard in snapshot.get("hazards", []):
 		var tiles: Array[Vector2i] = []

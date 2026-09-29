@@ -16,6 +16,7 @@ const PICKUP_BLAST_RANGE = 1
 const PICKUP_VISION = 2
 const PICKUP_MYSTERY = 3
 const PICKUP_SPEED = 4
+const PICKUP_BOMB_KICK = 5
 const DEEP_WATER = 3
 const SUDDEN_DEATH_START = 180.0
 const HAZARD_INTERVAL = 15.0
@@ -46,6 +47,7 @@ var round_over := false
 var result := ""
 var rng := RandomNumberGenerator.new()
 var move_targets := [Vector2.ZERO, Vector2.ZERO]
+var slide_active: Array[bool] = []
 
 
 func new_round() -> void:
@@ -57,8 +59,10 @@ func new_round() -> void:
 	flames.clear()
 	pickups.clear()
 	move_targets.clear()
+	slide_active.clear()
 	for i in range(player_count):
 		move_targets.append(Vector2.ZERO)
+		slide_active.append(false)
 	while scores.size() < player_count:
 		scores.append({"wins": 0, "kills": 0})
 	round_over = false
@@ -106,9 +110,14 @@ func new_round() -> void:
 			for x in range(1, WIDTH - 1):
 				if absi(x - WIDTH / 2) <= 2 and y % 2 == 1 and board[y][x] == OPEN:
 					terrain[y][x] = 1
+	elif wall_mode == "frost":
+		for y in range(3, HEIGHT - 2):
+			for x in range(1, WIDTH - 1):
+				if absi(x - WIDTH / 2) <= 3 and y % 2 == 1 and board[y][x] == OPEN:
+					terrain[y][x] = 2
 	players = []
 	for tile in spawns:
-		players.append({"pos": center(tile), "alive": true, "bomb_limit": 1, "range": 1, "vision": 1, "speed_bonus": 0.0, "safe_bomb": Vector2i(-1, -1), "facing": 0.0})
+		players.append({"pos": center(tile), "alive": true, "bomb_limit": 1, "range": 1, "vision": 1, "speed_bonus": 0.0, "can_kick": false, "safe_bomb": Vector2i(-1, -1), "facing": 0.0})
 
 
 func configure_map(count: int) -> void:
@@ -223,6 +232,7 @@ func step(delta: float, directions: Array, plant_requests: Array) -> void:
 		flame.time -= delta
 		if flame.time <= 0.0:
 			flames.erase(flame)
+	update_moving_bombs(delta)
 	update_bombs(delta)
 	for hazard in hazards.duplicate():
 		hazard.time -= delta
@@ -251,6 +261,8 @@ func step(delta: float, directions: Array, plant_requests: Array) -> void:
 						players[i].range += 1
 				PICKUP_SPEED:
 					players[i].speed_bonus = minf(players[i].speed_bonus + 0.25, 0.5)
+				PICKUP_BOMB_KICK:
+					players[i].can_kick = true
 			pickups.erase(tile)
 		var closest_distance := 1_000_000
 		var closest_owner := -1
@@ -297,10 +309,23 @@ func schedule_hazards(previous_elapsed: float) -> void:
 						tiles.append(Vector2i(x, y))
 			hazards.append({"kind": "flood", "tiles": tiles, "time": next_hazard_at + HAZARD_WARNING - previous_elapsed})
 			next_hazard_at += HAZARD_INTERVAL
+	elif wall_mode == "frost":
+		while round_elapsed >= next_hazard_at:
+			hazard_waves += 1
+			var available_rows: Array[int] = []
+			for y in range(1, HEIGHT - 1):
+				available_rows.append(y)
+			var tiles: Array[Vector2i] = []
+			for i in range(mini(1 << (hazard_waves - 1), available_rows.size())):
+				var y: int = available_rows.pop_at(rng.randi_range(0, available_rows.size() - 1))
+				for x in range(WIDTH):
+					tiles.append(Vector2i(x, y))
+			hazards.append({"kind": "blizzard", "tiles": tiles, "time": next_hazard_at + HAZARD_WARNING - previous_elapsed})
+			next_hazard_at += HAZARD_INTERVAL
 
 
 func resolve_hazard(hazard: Dictionary) -> void:
-	if hazard.kind == "random_burst":
+	if hazard.kind in ["random_burst", "blizzard"]:
 		var triggered: Array = []
 		for tile in hazard.tiles:
 			blast_cell(tile, -1, 0, triggered)
@@ -368,9 +393,28 @@ func warning_tiles() -> Array[Vector2i]:
 func start_move(i: int, direction: Vector2) -> void:
 	var next_tile := tile_at(players[i].pos) + Vector2i(direction)
 	var target := center(next_tile)
+	if wall_mode == "frost" and players[i].can_kick:
+		try_kick_bomb(next_tile, Vector2i(direction))
 	if can_stand(target, i):
 		move_targets[i] = target
 		players[i].facing = direction.angle() - PI / 2.0
+
+
+func try_kick_bomb(tile: Vector2i, direction: Vector2i) -> bool:
+	for bomb in bombs:
+		if bomb.tile != tile or bomb.get("danger", false):
+			continue
+		var next_tile: Vector2i = tile + direction
+		if not inside(next_tile) or board[next_tile.y][next_tile.x] != OPEN:
+			return false
+		for other in bombs:
+			if other != bomb and other.tile == next_tile:
+				return false
+		bomb.tile = next_tile
+		bomb.kick_direction = direction
+		bomb.kick_progress = 0.0
+		return true
+	return false
 
 
 func move_player(i: int, delta: float, direction: Vector2) -> void:
@@ -385,10 +429,18 @@ func move_player(i: int, delta: float, direction: Vector2) -> void:
 	var speed: float = SPEED * (1.0 + players[i].speed_bonus)
 	if terrain[tile_at(players[i].pos).y][tile_at(players[i].pos).x] == 1:
 		speed *= 0.8
+	var travel_direction := Vector2i(int(sign(target.x - players[i].pos.x)), int(sign(target.y - players[i].pos.y)))
 	players[i].pos = players[i].pos.move_toward(target, speed * delta)
 	update_safe_bomb(i)
 	if players[i].pos == target:
 		move_targets[i] = Vector2.ZERO
+		if slide_active[i]:
+			slide_active[i] = false
+		elif wall_mode == "frost" and terrain[tile_at(target).y][tile_at(target).x] == 2:
+			var slide_target := center(tile_at(target) + travel_direction)
+			if can_stand(slide_target, i):
+				move_targets[i] = slide_target
+				slide_active[i] = true
 
 
 func update_safe_bomb(i: int) -> void:
@@ -411,6 +463,28 @@ func place_bomb(i: int) -> void:
 		return
 	bombs.append({"tile": tile, "owner": i, "range": players[i].range, "time": FUSE})
 	players[i].safe_bomb = tile
+
+
+func update_moving_bombs(delta: float) -> void:
+	for bomb in bombs:
+		var direction: Vector2i = bomb.get("kick_direction", Vector2i.ZERO)
+		if direction == Vector2i.ZERO:
+			continue
+		bomb.kick_progress = bomb.get("kick_progress", 0.0) + minf(delta, maxf(bomb.time, 0.0)) * 4.0
+		while bomb.kick_progress >= 1.0:
+			var next_tile: Vector2i = bomb.tile + direction
+			var blocked: bool = not inside(next_tile) or board[next_tile.y][next_tile.x] != OPEN
+			if not blocked:
+				for other in bombs:
+					if other != bomb and other.tile == next_tile:
+						blocked = true
+						break
+			if blocked:
+				bomb.kick_direction = Vector2i.ZERO
+				bomb.kick_progress = 0.0
+				break
+			bomb.tile = next_tile
+			bomb.kick_progress -= 1.0
 
 
 func update_bombs(delta: float) -> void:
@@ -471,6 +545,8 @@ func update_bombs(delta: float) -> void:
 					kinds.append(PICKUP_MYSTERY)
 				"pond":
 					kinds.append(PICKUP_SPEED)
+				"frost":
+					kinds.append(PICKUP_BOMB_KICK)
 			pickups[tile] = kinds[rng.randi_range(0, kinds.size() - 1)]
 
 

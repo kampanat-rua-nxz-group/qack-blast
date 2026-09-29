@@ -47,6 +47,12 @@ func run_checks(app) -> void:
 	room.game.players[0].speed_bonus = 0.25
 	app.client.accept(registry.game_view(room))
 	check(app.arena.game.terrain[1][1] == 1 and is_equal_approx(app.arena.game.players[0].speed_bonus, 0.25), "client restores water and speed from snapshot")
+	check(registry.game_view(room).players[0].has("can_kick"), "bomb-kick upgrade is included in snapshots")
+	room.game.players[0].can_kick = true
+	room.game.bombs.append({"tile": Vector2i(4, 4), "owner": 0, "time": 1.0, "kick_direction": Vector2i.RIGHT, "kick_progress": 0.5})
+	app.client.accept(registry.game_view(room))
+	check(app.arena.game.players[0].can_kick and app.arena.game.bombs.back().kick_direction == Vector2i.RIGHT and is_equal_approx(app.arena.game.bombs.back().kick_progress, 0.5), "client restores moving bomb and kick upgrade")
+	room.game.bombs.pop_back()
 	check(app.arena.viewer_slot == 0 and not app.arena.visible_tile(Vector2i(11, 9)), "online darkness uses the local player's slot")
 	var danger_bomb := {"tile": Vector2i(3, 3), "owner": -1, "range": 0, "time": 5.0, "danger": true}
 	room.game.bombs.append(danger_bomb)
