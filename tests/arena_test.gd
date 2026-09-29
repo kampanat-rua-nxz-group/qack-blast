@@ -462,10 +462,10 @@ func test_danger_bomb_waves() -> void:
 	clear_crates(game)
 	var idle := [Vector2.ZERO, Vector2.ZERO]
 	var no_bombs := [false, false]
-	game.step(294.9, idle, no_bombs)
+	game.step(179.9, idle, no_bombs)
 	check(game.bombs.is_empty() and game.warning_tiles().is_empty(), "danger bombs do not appear before the warning")
 	game.step(0.1, idle, no_bombs)
-	check(game.bombs.size() == 1 and game.bombs[0].get("danger", false), "one danger bomb appears at 4:55")
+	check(game.bombs.size() == 1 and game.bombs[0].get("danger", false), "one danger bomb warns at three minutes")
 	if game.bombs.is_empty():
 		return
 	var bomb_tile: Vector2i = game.bombs[0].tile
@@ -481,11 +481,16 @@ func test_danger_bomb_waves() -> void:
 	game.players[0].pos = game.center(safe_tiles[0])
 	game.players[1].pos = game.center(safe_tiles[1])
 	game.step(5.0, idle, no_bombs)
-	check(game.bombs.is_empty() and game.flames.size() > 0, "danger bomb explodes at five minutes")
+	check(game.bombs.is_empty() and game.flames.size() > 0, "danger bomb explodes at 3:05")
 	check(not game.round_over and game.warning_tiles().is_empty(), "blast clears without closing tiles")
 	game.step(10.0, idle, no_bombs)
 	check(game.bombs.size() == 2 and game.bombs.all(func(bomb): return bomb.get("danger", false)), "second wave warns with two bombs")
 	check(game.warning_tiles().size() > 0, "second wave warning appears five seconds before its blast")
+	var big_step_game = load("res://scripts/arena_game.gd").new()
+	big_step_game.new_round()
+	big_step_game.round_elapsed = 209.0
+	big_step_game.step(1.0, idle, no_bombs)
+	check(big_step_game.danger_waves == 3 and big_step_game.next_danger_at == 230.0, "large step catches each due warning once")
 
 
 func test_danger_bomb_crosses_walls() -> void:

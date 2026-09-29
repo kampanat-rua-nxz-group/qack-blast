@@ -184,6 +184,12 @@ func _game_changed(snapshot: Dictionary) -> void:
 	game.bombs.clear()
 	for bomb in snapshot.bombs:
 		game.bombs.append({"tile": Vector2i(bomb.tile[0], bomb.tile[1]), "owner": bomb.owner, "time": bomb.time, "danger": bomb.get("danger", false)})
+	game.hazards.clear()
+	for hazard in snapshot.get("hazards", []):
+		var tiles: Array[Vector2i] = []
+		for tile in hazard.tiles:
+			tiles.append(Vector2i(tile[0], tile[1]))
+		game.hazards.append({"kind": hazard.kind, "tiles": tiles, "time": hazard.time})
 	game.flames.clear()
 	for flame in snapshot.flames:
 		game.flames.append({"tile": Vector2i(flame.tile[0], flame.tile[1]), "owner": flame.owner, "time": flame.time})

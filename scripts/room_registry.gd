@@ -192,7 +192,13 @@ func game_view(room: Dictionary) -> Dictionary:
 	var pickups := []
 	for tile in game.pickups:
 		pickups.append({"tile": [tile.x, tile.y], "kind": game.pickups[tile]})
-	return {"type": "game", "board": game.board, "players": players, "bombs": bombs, "flames": flames, "pickups": pickups, "scores": game.scores, "round_elapsed": game.round_elapsed, "round_over": game.round_over, "result": game.result, "wall_mode": game.wall_mode}
+	var hazards := []
+	for hazard in game.hazards:
+		var tiles := []
+		for tile in hazard.tiles:
+			tiles.append([tile.x, tile.y])
+		hazards.append({"kind": hazard.kind, "tiles": tiles, "time": hazard.time})
+	return {"type": "game", "board": game.board, "players": players, "bombs": bombs, "hazards": hazards, "flames": flames, "pickups": pickups, "scores": game.scores, "round_elapsed": game.round_elapsed, "round_over": game.round_over, "result": game.result, "wall_mode": game.wall_mode}
 
 
 func make_code() -> String:

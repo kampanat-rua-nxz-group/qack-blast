@@ -47,6 +47,12 @@ func run_checks(app) -> void:
 	room.game.bombs.append(danger_bomb)
 	app.client.accept(registry.game_view(room))
 	check(app.arena.game.bombs[0].get("danger", false) and app.arena.game.warning_tiles().has(Vector2i(11, 3)), "online warning spans the danger bomb's row")
+	if room.game.get("hazards") == null:
+		check(false, "online snapshot carries map hazards")
+	else:
+		room.game.hazards.append({"kind": "random_burst", "tiles": [Vector2i(2, 2)], "time": 5.0})
+		app.client.accept(registry.game_view(room))
+		check(app.arena.game.hazards.size() == 1 and app.arena.game.warning_tiles().has(Vector2i(2, 2)), "online snapshot restores map hazard warnings")
 	room.game.bombs.erase(danger_bomb)
 	room.game.players[0].alive = false
 	room.game.resolve_round()

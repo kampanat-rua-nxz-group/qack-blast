@@ -14,9 +14,12 @@ const OPEN = 0
 const PICKUP_BOMB_CAPACITY = 0
 const PICKUP_BLAST_RANGE = 1
 const PICKUP_VISION = 2
-const DANGER_START = 300.0
-const DANGER_INTERVAL = 15.0
-const DANGER_WARNING = 5.0
+const SUDDEN_DEATH_START = 180.0
+const HAZARD_INTERVAL = 15.0
+const HAZARD_WARNING = 5.0
+const DANGER_START = SUDDEN_DEATH_START + HAZARD_WARNING
+const DANGER_INTERVAL = HAZARD_INTERVAL
+const DANGER_WARNING = HAZARD_WARNING
 const DIRECTIONS = [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
 const MAP_MODES = ["fixed", "random", "pond", "frost", "night"]
 const MAP_NAMES = {"fixed": "Classic", "random": "Random", "pond": "Lily Pond", "frost": "Frost Garden", "night": "Nightfall"}
@@ -24,6 +27,7 @@ const MAP_NAMES = {"fixed": "Classic", "random": "Random", "pond": "Lily Pond", 
 var board: Array = []
 var players: Array = []
 var bombs: Array = []
+var hazards: Array = []
 var flames: Array = []
 var pickups: Dictionary = {}
 var player_count := 2
@@ -42,6 +46,7 @@ func new_round() -> void:
 	configure_map(player_count)
 	board.clear()
 	bombs.clear()
+	hazards.clear()
 	flames.clear()
 	pickups.clear()
 	move_targets.clear()
@@ -190,7 +195,7 @@ func step(delta: float, directions: Array, plant_requests: Array) -> void:
 		return
 	var previous_elapsed := round_elapsed
 	round_elapsed += delta
-	schedule_danger_bombs(previous_elapsed)
+	schedule_hazards(previous_elapsed)
 	for i in range(players.size()):
 		if not players[i].alive:
 			continue
@@ -202,6 +207,11 @@ func step(delta: float, directions: Array, plant_requests: Array) -> void:
 		if flame.time <= 0.0:
 			flames.erase(flame)
 	update_bombs(delta)
+	for hazard in hazards.duplicate():
+		hazard.time -= delta
+		if hazard.time <= 0.0:
+			hazards.erase(hazard)
+			resolve_hazard(hazard)
 	for i in range(players.size()):
 		if not players[i].alive:
 			continue
@@ -234,6 +244,15 @@ func step(delta: float, directions: Array, plant_requests: Array) -> void:
 	resolve_round()
 
 
+func schedule_hazards(previous_elapsed: float) -> void:
+	if wall_mode == "fixed":
+		schedule_danger_bombs(previous_elapsed)
+
+
+func resolve_hazard(_hazard: Dictionary) -> void:
+	pass
+
+
 func schedule_danger_bombs(previous_elapsed: float) -> void:
 	while round_elapsed >= next_danger_at - DANGER_WARNING:
 		danger_waves += 1
@@ -250,7 +269,7 @@ func schedule_danger_bombs(previous_elapsed: float) -> void:
 						break
 				if not occupied:
 					available.append(tile)
-		for i in range(mini(danger_waves, available.size())):
+		for i in range(mini(1 << (danger_waves - 1), available.size())):
 			var index := rng.randi_range(0, available.size() - 1)
 			bombs.append({"tile": available.pop_at(index), "owner": -1, "range": 0, "time": next_danger_at - previous_elapsed, "danger": true})
 		next_danger_at += DANGER_INTERVAL
@@ -258,6 +277,11 @@ func schedule_danger_bombs(previous_elapsed: float) -> void:
 
 func warning_tiles() -> Array[Vector2i]:
 	var tiles: Array[Vector2i] = []
+	for hazard in hazards:
+		if hazard.time > 0.0:
+			for tile in hazard.tiles:
+				if not tiles.has(tile):
+					tiles.append(tile)
 	for bomb in bombs:
 		if not bomb.get("danger", false) or bomb.time <= 0.0:
 			continue
