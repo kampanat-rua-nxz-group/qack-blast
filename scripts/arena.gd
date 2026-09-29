@@ -101,6 +101,8 @@ func _draw() -> void:
 	rounded_box(Rect2(704, 24, 114, 38), Color("ffe1a6"), 19.0)
 	centered_text("%s  %dP" % ["ONLINE" if networked else "LOCAL", game.players.size()], Vector2(761, 49), 15, Color("73512d"))
 	centered_text("%s  %d:%02d" % [ArenaGame.MAP_NAMES[game.wall_mode].to_upper(), int(game.round_elapsed) / 60, int(game.round_elapsed) % 60], Vector2(635, 49), 13, Color("73512d"))
+	if game.round_elapsed >= game.SUDDEN_DEATH_START and not game.round_over:
+		centered_text("SUDDEN DEATH", Vector2(635, 68), 11, Color("c35162"))
 	if selected_wall_mode != game.wall_mode:
 		centered_text("NEXT: %s" % ArenaGame.MAP_NAMES[selected_wall_mode].to_upper(), Vector2(500, 49), 12, Color("92536b"))
 	rounded_box(Rect2(136, 76, 688, 584), colors.frame, 13.0)
@@ -110,6 +112,12 @@ func _draw() -> void:
 			var tile := Vector2i(x, y)
 			var rect := Rect2(game.ORIGIN + Vector2(x, y) * game.CELL, Vector2.ONE * game.CELL)
 			draw_rect(rect, colors.floor if (x + y) % 2 == 0 else colors.floor_alt)
+			if game.board[y][x] == game.DEEP_WATER:
+				draw_rect(rect, Color("3b88b3"))
+			elif game.terrain[y][x] == 1:
+				draw_rect(rect.grow(-3.0), Color("92d9dd"))
+			elif game.terrain[y][x] == 2:
+				draw_rect(rect.grow(-3.0), Color("c5e9f7"))
 			if game.board[y][x] == game.WALL:
 				draw_wall(rect, colors)
 			elif game.board[y][x] == game.CRATE:
@@ -120,7 +128,8 @@ func _draw() -> void:
 				draw_pickup(game.center(tile), game.pickups[tile])
 	for bomb in game.bombs:
 		if not bomb.get("danger", false):
-			draw_bomb(game.center(bomb.tile), bomb.time)
+			var kick_direction: Vector2i = bomb.get("kick_direction", Vector2i.ZERO)
+			draw_bomb(game.center(bomb.tile) + Vector2(kick_direction) * game.CELL * bomb.get("kick_progress", 0.0), bomb.time)
 	var flame_owners := {}
 	for flame in game.flames:
 		if not flame_owners.has(flame.tile):
@@ -130,15 +139,35 @@ func _draw() -> void:
 			owners.append(flame.owner)
 	for tile in flame_owners:
 		draw_flame(game.center(tile), flame_owners[tile])
+	for flame in game.flames:
+		if flame.get("kind", "") == "blizzard":
+			draw_line(game.center(flame.tile) + Vector2(-17, -17), game.center(flame.tile) + Vector2(17, 17), Color("ddf9ff"), 4.0, true)
+		elif flame.get("kind", "") == "random_burst":
+			draw_arc(game.center(flame.tile), 17.0, 0.0, TAU, 24, Color("c18cff"), 4.0, true)
 	for i in range(game.players.size()):
 		if game.players[i].alive:
 			draw_duck(game.players[i].pos, i, visual_facing[i], walk_phase[i])
 	if game.wall_mode == "night" and not game.round_over:
 		draw_night_vision()
 	if int(floor(game.round_elapsed * 2.0)) % 2 == 0:
-		for tile in game.warning_tiles():
-			var rect := Rect2(game.ORIGIN + Vector2(tile) * game.CELL, Vector2.ONE * game.CELL)
-			draw_rect(rect.grow(-3.0), Color("f5a65599"), false, 5.0)
+		for hazard in game.hazards:
+			var color := Color("bd89f5")
+			match hazard.kind:
+				"flood": color = Color("5bc9e8")
+				"blizzard": color = Color("d8f6ff")
+				"closing_walls": color = Color("a6abbc")
+			for tile in hazard.tiles:
+				var rect := Rect2(game.ORIGIN + Vector2(tile) * game.CELL, Vector2.ONE * game.CELL)
+				draw_rect(rect.grow(-3.0), color, false, 5.0)
+		for bomb in game.bombs:
+			if not bomb.get("danger", false):
+				continue
+			for x in range(game.WIDTH):
+				var row_rect := Rect2(game.ORIGIN + Vector2(x, bomb.tile.y) * game.CELL, Vector2.ONE * game.CELL)
+				draw_rect(row_rect.grow(-3.0), Color("f5a65599"), false, 5.0)
+			for y in range(game.HEIGHT):
+				var column_rect := Rect2(game.ORIGIN + Vector2(bomb.tile.x, y) * game.CELL, Vector2.ONE * game.CELL)
+				draw_rect(column_rect.grow(-3.0), Color("f5a65599"), false, 5.0)
 	for bomb in game.bombs:
 		if bomb.get("danger", false):
 			draw_bomb(game.center(bomb.tile), bomb.time)
@@ -259,6 +288,22 @@ func draw_crate(rect: Rect2, colors: Dictionary) -> void:
 
 func draw_pickup(pos: Vector2, kind: int) -> void:
 	draw_circle(pos + Vector2(0, 3), 17.0, Color("b5cbbd"))
+	if kind == game.PICKUP_MYSTERY:
+		draw_circle(pos, 17.0, Color("f4accb"))
+		draw_circle(pos, 12.0, Color("ffe4f0"))
+		centered_text("?", pos + Vector2(0, 7), 21, Color("944d75"))
+		return
+	if kind == game.PICKUP_SPEED:
+		draw_circle(pos, 17.0, Color("88dbac"))
+		draw_circle(pos, 12.0, Color("ddffe9"))
+		draw_line(pos + Vector2(-7, 4), pos + Vector2(7, -4), Color("438566"), 4.0, true)
+		return
+	if kind == game.PICKUP_BOMB_KICK:
+		draw_circle(pos, 17.0, Color("a9d6f2"))
+		draw_circle(pos, 12.0, Color("e5f6ff"))
+		draw_circle(pos + Vector2(-4, 0), 5.0, Color("49799c"))
+		draw_line(pos + Vector2(2, 0), pos + Vector2(9, 0), Color("49799c"), 3.0, true)
+		return
 	if kind == game.PICKUP_VISION:
 		draw_circle(pos, 17.0, Color("a2dbef"))
 		draw_circle(pos, 12.0, Color("e3f8ff"))
@@ -332,4 +377,8 @@ func draw_player_card(i: int) -> void:
 	centered_text("BOMB %d   FIRE %d" % [game.players[i].bomb_limit, game.players[i].range], Vector2(x + 60, y + (130 if compact else 149)), 12, Color("827b8b"))
 	if game.wall_mode == "night":
 		centered_text("SIGHT %d" % game.players[i].vision, Vector2(x + 60, y + (148 if compact else 166)), 12, Color("827b8b"))
+	elif game.wall_mode == "pond":
+		centered_text("SPEED %d%%" % int((1.0 + game.players[i].speed_bonus) * 100), Vector2(x + 60, y + (148 if compact else 166)), 12, Color("827b8b"))
+	elif game.wall_mode == "frost":
+		centered_text("BOMB KICK %s" % ("ON" if game.players[i].can_kick else "OFF"), Vector2(x + 60, y + (148 if compact else 166)), 12, Color("827b8b"))
 	centered_text("WINS %d   KILLS %d" % [game.scores[i].wins, game.scores[i].kills], Vector2(x + 60, y + (166 if compact else 181)), 12, Color("827b8b"))

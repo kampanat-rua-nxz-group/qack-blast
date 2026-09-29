@@ -182,17 +182,24 @@ func game_view(room: Dictionary) -> Dictionary:
 	var game = room.game
 	var players := []
 	for player in game.players:
-		players.append({"pos": [player.pos.x, player.pos.y], "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "facing": player.facing})
+		players.append({"pos": [player.pos.x, player.pos.y], "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.speed_bonus, "can_kick": player.can_kick, "facing": player.facing})
 	var bombs := []
 	for bomb in game.bombs:
-		bombs.append({"tile": [bomb.tile.x, bomb.tile.y], "owner": bomb.owner, "time": bomb.time, "danger": bomb.get("danger", false)})
+		var kick_direction: Vector2i = bomb.get("kick_direction", Vector2i.ZERO)
+		bombs.append({"tile": [bomb.tile.x, bomb.tile.y], "owner": bomb.owner, "time": bomb.time, "danger": bomb.get("danger", false), "kick_direction": [kick_direction.x, kick_direction.y], "kick_progress": bomb.get("kick_progress", 0.0)})
 	var flames := []
 	for flame in game.flames:
-		flames.append({"tile": [flame.tile.x, flame.tile.y], "owner": flame.owner, "time": flame.time})
+		flames.append({"tile": [flame.tile.x, flame.tile.y], "owner": flame.owner, "time": flame.time, "kind": flame.get("kind", "")})
 	var pickups := []
 	for tile in game.pickups:
 		pickups.append({"tile": [tile.x, tile.y], "kind": game.pickups[tile]})
-	return {"type": "game", "board": game.board, "players": players, "bombs": bombs, "flames": flames, "pickups": pickups, "scores": game.scores, "round_elapsed": game.round_elapsed, "round_over": game.round_over, "result": game.result, "wall_mode": game.wall_mode}
+	var hazards := []
+	for hazard in game.hazards:
+		var tiles := []
+		for tile in hazard.tiles:
+			tiles.append([tile.x, tile.y])
+		hazards.append({"kind": hazard.kind, "tiles": tiles, "time": hazard.time})
+	return {"type": "game", "board": game.board, "terrain": game.terrain, "players": players, "bombs": bombs, "hazards": hazards, "flames": flames, "pickups": pickups, "scores": game.scores, "round_elapsed": game.round_elapsed, "round_over": game.round_over, "result": game.result, "wall_mode": game.wall_mode}
 
 
 func make_code() -> String:

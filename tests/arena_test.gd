@@ -32,6 +32,13 @@ func _initialize() -> void:
 	test_night_visibility(arena)
 	test_night_spotlight(arena)
 	test_night_drops_vision()
+	test_random_mystery_and_bursts()
+	test_random_burst_chain()
+	test_map_specific_pickup_drops()
+	test_pond_water_speed_and_flood()
+	test_large_step_resolves_flood_before_bomb()
+	test_frost_ice_and_bomb_kick()
+	test_frost_blizzard()
 	test_win_and_kill_persist()
 	test_chain_kill_belongs_to_triggered_bomb()
 	test_closer_blast_gets_kill()
@@ -47,6 +54,7 @@ func _initialize() -> void:
 	test_scene_accepts_four_player_state(arena)
 	test_wall_modes()
 	test_night_wall_layout()
+	test_night_wall_reshuffle_and_closure()
 	test_map_themes(arena)
 	test_wall_selection_applies_next_round(arena)
 	test_danger_bomb_waves()
@@ -415,6 +423,48 @@ func test_night_wall_layout() -> void:
 	check(layouts.size() > 1, "night obstacles reroll each round")
 
 
+func test_night_wall_reshuffle_and_closure() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "night"
+	game.rng.seed = 13
+	game.new_round()
+	clear_crates(game)
+	game.players[0].pos = game.center(Vector2i(2, 1)) + Vector2(18, 0)
+	game.move_targets[0] = game.center(Vector2i(3, 1))
+	game.board[1][2] = game.OPEN
+	game.board[1][3] = game.OPEN
+	game.board[1][4] = game.OPEN
+	game.board[1][5] = game.OPEN
+	game.bombs.append({"tile": Vector2i(4, 1), "owner": 0, "range": 1, "time": 90.0})
+	game.pickups[Vector2i(5, 1)] = game.PICKUP_VISION
+	var before: String = wall_mask(game)
+	game.round_elapsed = 59.9
+	game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.get("next_night_shuffle_at") != null, "night schedules minute wall reshuffles")
+	if game.get("next_night_shuffle_at") == null:
+		return
+	check(game.next_night_shuffle_at == 120.0 and wall_mask(game) != before, "night walls change at one minute")
+	for protected_tile in [Vector2i(2, 1), Vector2i(3, 1), Vector2i(4, 1), Vector2i(5, 1)]:
+		check(game.board[protected_tile.y][protected_tile.x] != game.WALL, "night reshuffle protects movement, bombs, and pickups")
+	var reachable := reachable_open_tiles(game, game.tile_at(game.players[0].pos))
+	check(reachable.has(game.tile_at(game.players[1].pos)), "night reshuffle keeps players connected")
+	game.round_elapsed = 120.0
+	game.schedule_hazards(120.0)
+	check(game.next_night_shuffle_at == 180.0, "night reshuffles again at two minutes")
+	game.round_elapsed = 180.0
+	game.schedule_hazards(180.0)
+	check(game.bombs.size() == 1 and game.hazards.size() == 1 and game.hazards[0].kind == "closing_walls", "night sudden death warns walls without danger bombs")
+	var closing_game = load("res://scripts/arena_game.gd").new()
+	closing_game.wall_mode = "night"
+	closing_game.new_round()
+	var spawn: Vector2i = closing_game.tile_at(closing_game.players[0].pos)
+	closing_game.hazards.append({"kind": "closing_walls", "tiles": [spawn], "time": 5.0})
+	closing_game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(closing_game.players[0].alive and closing_game.warning_tiles().has(spawn), "closing wall warns before striking")
+	closing_game.step(4.9, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(closing_game.board[spawn.y][spawn.x] == closing_game.WALL and not closing_game.players[0].alive, "closing wall persists and eliminates duck")
+
+
 func test_map_themes(arena) -> void:
 	if not arena.has_method("map_colors"):
 		check(false, "arena exposes map colors")
@@ -462,10 +512,10 @@ func test_danger_bomb_waves() -> void:
 	clear_crates(game)
 	var idle := [Vector2.ZERO, Vector2.ZERO]
 	var no_bombs := [false, false]
-	game.step(294.9, idle, no_bombs)
+	game.step(179.9, idle, no_bombs)
 	check(game.bombs.is_empty() and game.warning_tiles().is_empty(), "danger bombs do not appear before the warning")
 	game.step(0.1, idle, no_bombs)
-	check(game.bombs.size() == 1 and game.bombs[0].get("danger", false), "one danger bomb appears at 4:55")
+	check(game.bombs.size() == 1 and game.bombs[0].get("danger", false), "one danger bomb warns at three minutes")
 	if game.bombs.is_empty():
 		return
 	var bomb_tile: Vector2i = game.bombs[0].tile
@@ -481,11 +531,18 @@ func test_danger_bomb_waves() -> void:
 	game.players[0].pos = game.center(safe_tiles[0])
 	game.players[1].pos = game.center(safe_tiles[1])
 	game.step(5.0, idle, no_bombs)
-	check(game.bombs.is_empty() and game.flames.size() > 0, "danger bomb explodes at five minutes")
+	check(game.bombs.is_empty() and game.flames.size() > 0, "danger bomb explodes at 3:05")
 	check(not game.round_over and game.warning_tiles().is_empty(), "blast clears without closing tiles")
 	game.step(10.0, idle, no_bombs)
 	check(game.bombs.size() == 2 and game.bombs.all(func(bomb): return bomb.get("danger", false)), "second wave warns with two bombs")
 	check(game.warning_tiles().size() > 0, "second wave warning appears five seconds before its blast")
+	var big_step_game = load("res://scripts/arena_game.gd").new()
+	big_step_game.new_round()
+	big_step_game.round_elapsed = 209.0
+	big_step_game.danger_waves = 2
+	big_step_game.next_danger_at = 215.0
+	big_step_game.step(1.0, idle, no_bombs)
+	check(big_step_game.danger_waves == 3 and big_step_game.next_danger_at == 230.0, "step crossing warning boundary schedules the next wave once")
 
 
 func test_danger_bomb_crosses_walls() -> void:
@@ -727,6 +784,229 @@ func test_night_drops_vision() -> void:
 		if found_vision:
 			break
 	check(found_vision, "night map can drop vision items")
+
+
+func test_random_mystery_and_bursts() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "random"
+	game.rng.seed = 4
+	game.new_round()
+	clear_crates(game)
+	var spawn: Vector2i = game.tile_at(game.players[0].pos)
+	game.players[0].bomb_limit = 5
+	game.players[0].range = 2
+	game.pickups[spawn] = 3
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.players[0].range == 3 and not game.pickups.has(spawn), "mystery chooses the uncapped upgrade")
+	game.players[0].range = 6
+	game.pickups[spawn] = 3
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.players[0].range == 6 and game.players[0].bomb_limit == 5 and not game.pickups.has(spawn), "capped mystery item is consumed")
+	game.round_elapsed = 180.0
+	game.schedule_hazards(180.0)
+	check(game.hazards.size() == 1 and game.hazards[0].tiles.size() == 1, "random first wave warns one tile")
+	game.round_elapsed = 195.0
+	game.schedule_hazards(195.0)
+	check(game.hazards.size() == 2 and game.hazards[1].tiles.size() == 2, "random second wave warns two tiles")
+	game.round_elapsed = 210.0
+	game.schedule_hazards(210.0)
+	check(game.hazards.size() == 3 and game.hazards[2].tiles.size() == 4, "random third wave warns four tiles")
+	game.hazards.clear()
+	game.round_elapsed = 0.0
+	game.players[0].pos = game.center(Vector2i(1, 1))
+	game.players[1].pos = game.center(Vector2i(11, 9))
+	game.hazards.append({"kind": "random_burst", "tiles": [Vector2i(1, 1)], "time": 0.1})
+	game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(not game.players[0].alive and game.players[1].alive, "random burst eliminates only marked duck")
+	check(game.result == "PLAYER 2 WINS", "random burst resolves to sole survivor")
+
+
+func test_random_burst_chain() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "random"
+	game.new_round()
+	clear_crates(game)
+	game.board[3][3] = game.CRATE
+	game.bombs.append({"tile": Vector2i(3, 4), "owner": 0, "range": 1, "time": 2.0})
+	game.hazards.append({"kind": "random_burst", "tiles": [Vector2i(3, 3), Vector2i(3, 4)], "time": 0.1})
+	game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.board[3][3] == game.OPEN, "random burst clears a marked crate")
+	check(game.bombs.is_empty() and has_flame(game, Vector2i(3, 4), 0), "random burst triggers the bomb on a marked tile")
+
+
+func test_map_specific_pickup_drops() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	for mode in ["random", "pond", "frost"]:
+		game.wall_mode = mode
+		var found_special := false
+		for seed_value in range(100):
+			game.rng.seed = seed_value
+			game.new_round()
+			game.board[1][2] = game.CRATE
+			game.place_bomb(0)
+			game.update_bombs(game.FUSE)
+			var kind: int = game.pickups.get(Vector2i(2, 1), -1)
+			if kind < 0:
+				continue
+			var special: int = 3 if mode == "random" else 4 if mode == "pond" else 5
+			check(kind in [0, 1, special], "%s only drops its own special item" % mode)
+			if kind == special:
+				found_special = true
+		check(found_special, "%s can drop its special item" % mode)
+
+
+func test_pond_water_speed_and_flood() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "pond"
+	game.new_round()
+	if game.get("terrain") == null:
+		check(false, "pond provides shallow-water terrain")
+		return
+	clear_crates(game)
+	var spawn: Vector2i = game.tile_at(game.players[0].pos)
+	check(game.terrain[spawn.y][spawn.x] == 0, "pond spawn starts dry")
+	game.terrain[spawn.y][spawn.x] = 1
+	var start: Vector2 = game.players[0].pos
+	game.move_player(0, 0.1, Vector2.RIGHT)
+	check(is_equal_approx(game.players[0].pos.x - start.x, 15.04), "shallow water slows movement to 80 percent")
+	game.players[0].pos = start
+	game.move_targets[0] = Vector2.ZERO
+	game.pickups[spawn] = 4
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(is_equal_approx(game.players[0].speed_bonus, 0.25), "speed pickup adds 25 percent")
+	game.pickups[spawn] = 4
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(is_equal_approx(game.players[0].speed_bonus, 0.5), "speed pickup caps at 50 percent")
+	game.hazards.append({"kind": "flood", "tiles": [spawn], "time": 5.0})
+	game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.players[0].alive, "flood warning does not kill early")
+	game.step(4.9, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.board[spawn.y][spawn.x] == 3 and not game.players[0].alive, "flood turns ring into lethal deep water")
+	check(game.solid(spawn, 1), "deep water remains blocked")
+	var approaching = load("res://scripts/arena_game.gd").new()
+	approaching.wall_mode = "pond"
+	approaching.new_round()
+	clear_crates(approaching)
+	approaching.players[0].pos = approaching.center(Vector2i(2, 2))
+	approaching.move_targets[0] = approaching.center(Vector2i(2, 1))
+	approaching.hazards.append({"kind": "flood", "tiles": [Vector2i(2, 1)], "time": 0.01})
+	approaching.step(0.01, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(approaching.players[0].alive and approaching.move_targets[0] == Vector2.ZERO, "flood cancels movement into deep water")
+	approaching.step(0.3, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(approaching.tile_at(approaching.players[0].pos) == Vector2i(2, 2), "duck cannot finish a cached move into deep water")
+	for count in [2, 4]:
+		var connected = load("res://scripts/arena_game.gd").new()
+		connected.wall_mode = "pond"
+		connected.player_count = count
+		connected.new_round()
+		clear_crates(connected)
+		for ring in range(1, mini(connected.WIDTH, connected.HEIGHT) / 2):
+			var flooded: Array[Vector2i] = []
+			for y in range(1, connected.HEIGHT - 1):
+				for x in range(1, connected.WIDTH - 1):
+					if mini(mini(x, connected.WIDTH - 1 - x), mini(y, connected.HEIGHT - 1 - y)) == ring:
+						flooded.append(Vector2i(x, y))
+			connected.resolve_hazard({"kind": "flood", "tiles": flooded})
+			check(dry_tiles_connected(connected), "pond dry cells stay connected after ring %d for %d ducks" % [ring, count])
+	game.player_count = 6
+	game.new_round()
+	check(game.terrain.size() == 13 and game.terrain[0].size() == 15, "large pond board builds terrain")
+	for player in game.players:
+		var tile: Vector2i = game.tile_at(player.pos)
+		check(game.terrain[tile.y][tile.x] == 0, "large pond spawns stay dry")
+
+
+func test_large_step_resolves_flood_before_bomb() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "pond"
+	game.new_round()
+	clear_crates(game)
+	var tile := Vector2i(5, 3)
+	game.bombs.append({"tile": tile, "owner": 0, "range": 1, "time": 10.0})
+	game.hazards.append({"kind": "flood", "tiles": [tile], "time": 5.0})
+	game.step(10.0, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.bombs.is_empty() and not has_flame(game, tile, 0), "large step removes flooded bomb before its fuse")
+
+
+func dry_tiles_connected(game) -> bool:
+	var dry: Array[Vector2i] = []
+	for y in range(1, game.HEIGHT - 1):
+		for x in range(1, game.WIDTH - 1):
+			if game.board[y][x] == game.OPEN:
+				dry.append(Vector2i(x, y))
+	if dry.is_empty():
+		return true
+	var seen := {dry[0]: true}
+	var queue := [dry[0]]
+	while not queue.is_empty():
+		var tile: Vector2i = queue.pop_front()
+		for direction in game.DIRECTIONS:
+			var neighbor: Vector2i = tile + direction
+			if not seen.has(neighbor) and dry.has(neighbor):
+				seen[neighbor] = true
+				queue.append(neighbor)
+	return seen.size() == dry.size()
+
+
+func test_frost_ice_and_bomb_kick() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "frost"
+	game.new_round()
+	clear_crates(game)
+	game.board[1][3] = game.OPEN
+	game.terrain[1][2] = 2
+	game.move_player(0, 0.3, Vector2.RIGHT)
+	check(game.move_targets[0] == game.center(Vector2i(3, 1)), "ice queues one extra tile of sliding")
+	game.move_player(0, 0.3, Vector2.ZERO)
+	check(game.players[0].pos == game.center(Vector2i(3, 1)) and game.move_targets[0] == Vector2.ZERO, "ice slide stops after one extra tile")
+	game.players[0].pos = game.center(Vector2i(1, 1))
+	game.move_targets[0] = Vector2.ZERO
+	game.terrain[1][2] = 0
+	game.board[1][3] = game.OPEN
+	game.board[1][4] = game.OPEN
+	game.board[1][5] = game.OPEN
+	game.board[1][6] = game.WALL
+	game.bombs.append({"tile": Vector2i(2, 1), "owner": 1, "range": 1, "time": 2.0})
+	game.start_move(0, Vector2.RIGHT)
+	check(game.bombs[0].tile == Vector2i(2, 1), "duck without kick cannot move bomb")
+	game.players[0].can_kick = true
+	game.start_move(0, Vector2.RIGHT)
+	check(game.bombs[0].tile == Vector2i(2, 1), "kick starts bomb without an instant extra tile")
+	game.update_moving_bombs(0.24)
+	check(game.bombs[0].tile == Vector2i(2, 1) and game.bombs[0].kick_progress < 1.0, "kick advances after elapsed travel time")
+	game.update_moving_bombs(1.0)
+	check(game.bombs[0].tile == Vector2i(5, 1) and game.bombs[0].owner == 1, "kicked bomb stops at last open tile before wall")
+	check(game.bombs[0].kick_direction == Vector2i.ZERO and game.bombs[0].kick_progress == 0.0, "bomb stops before drawing into blocked cell")
+	game.bombs[0].tile = Vector2i(3, 1)
+	game.bombs[0].time = 0.2
+	game.bombs[0].kick_direction = Vector2i.RIGHT
+	game.bombs[0].kick_progress = 0.0
+	game.step(0.2, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.bombs.is_empty() and has_flame(game, Vector2i(3, 1), 1), "moving bomb explodes at current tile when fuse ends")
+	for blocker in [game.CRATE, game.WALL]:
+		game.bombs = [{"tile": Vector2i(3, 1), "owner": 0, "range": 1, "time": 2.0}]
+		game.board[1][4] = blocker
+		check(not game.try_kick_bomb(Vector2i(3, 1), Vector2i.RIGHT) and game.bombs[0].tile == Vector2i(3, 1), "bomb kick stops before wall or crate")
+	game.board[1][4] = game.OPEN
+	game.bombs.append({"tile": Vector2i(4, 1), "owner": 1, "range": 1, "time": 2.0})
+	check(not game.try_kick_bomb(Vector2i(3, 1), Vector2i.RIGHT), "bomb kick stops before another bomb")
+	game.bombs = [{"tile": Vector2i(3, 1), "owner": -1, "range": 0, "time": 2.0, "danger": true}]
+	check(not game.try_kick_bomb(Vector2i(3, 1), Vector2i.RIGHT), "danger bomb cannot be kicked")
+
+
+func test_frost_blizzard() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "frost"
+	game.new_round()
+	game.round_elapsed = 180.0
+	game.schedule_hazards(180.0)
+	check(game.hazards.size() == 1 and game.hazards[0].kind == "blizzard", "frost warns blizzard at three minutes")
+	game.hazards.clear()
+	game.round_elapsed = 0.0
+	var spawn: Vector2i = game.tile_at(game.players[0].pos)
+	game.hazards.append({"kind": "blizzard", "tiles": [spawn], "time": 0.1})
+	game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(not game.players[0].alive and game.players[1].alive, "blizzard strike eliminates duck on warned row")
 
 
 func clear_crates(game) -> void:

@@ -42,13 +42,32 @@ func run_checks(app) -> void:
 	check(app.arena.game.players.size() == 2 and app.arena.game.board.size() == 11, "scene receives server snapshot")
 	check(app.arena.game.tile_at(app.arena.game.players[1].pos) == Vector2i(11, 9), "snapshot restores player positions")
 	check(app.arena.game.wall_mode == "night" and app.arena.game.players[0].vision == 1, "night vision arrives in server snapshot")
+	check(registry.game_view(room).has("terrain") and registry.game_view(room).players[0].has("speed_bonus"), "terrain and speed upgrade are included in snapshots")
+	room.game.terrain[1][1] = 1
+	room.game.players[0].speed_bonus = 0.25
+	app.client.accept(registry.game_view(room))
+	check(app.arena.game.terrain[1][1] == 1 and is_equal_approx(app.arena.game.players[0].speed_bonus, 0.25), "client restores water and speed from snapshot")
+	check(registry.game_view(room).players[0].has("can_kick"), "bomb-kick upgrade is included in snapshots")
+	room.game.players[0].can_kick = true
+	room.game.bombs.append({"tile": Vector2i(4, 4), "owner": 0, "time": 1.0, "kick_direction": Vector2i.RIGHT, "kick_progress": 0.5})
+	app.client.accept(registry.game_view(room))
+	check(app.arena.game.players[0].can_kick and app.arena.game.bombs.back().kick_direction == Vector2i.RIGHT and is_equal_approx(app.arena.game.bombs.back().kick_progress, 0.5), "client restores moving bomb and kick upgrade")
+	room.game.bombs.pop_back()
 	check(app.arena.viewer_slot == 0 and not app.arena.visible_tile(Vector2i(11, 9)), "online darkness uses the local player's slot")
 	var danger_bomb := {"tile": Vector2i(3, 3), "owner": -1, "range": 0, "time": 5.0, "danger": true}
 	room.game.bombs.append(danger_bomb)
 	app.client.accept(registry.game_view(room))
 	check(app.arena.game.bombs[0].get("danger", false) and app.arena.game.warning_tiles().has(Vector2i(11, 3)), "online warning spans the danger bomb's row")
+	if room.game.get("hazards") == null:
+		check(false, "online snapshot carries map hazards")
+	else:
+		room.game.hazards.append({"kind": "random_burst", "tiles": [Vector2i(2, 2)], "time": 5.0})
+		app.client.accept(registry.game_view(room))
+		check(app.arena.game.hazards.size() == 1 and app.arena.game.warning_tiles().has(Vector2i(2, 2)), "online snapshot restores map hazard warnings")
 	room.game.bombs.erase(danger_bomb)
 	room.game.players[0].alive = false
+	app.client.accept(registry.game_view(room))
+	check(app.arena.visible_tile(Vector2i(11, 9)), "eliminated online viewer sees full night map")
 	room.game.resolve_round()
 	room.phase = "results"
 	app.client.accept(registry.room_view(room))
