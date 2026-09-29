@@ -150,6 +150,13 @@ func _room_changed(room: Dictionary) -> void:
 	var playing: bool = room.phase == "playing"
 	lobby.visible = not playing
 	arena.visible = playing
+	arena.player_names.clear()
+	for person in room.people:
+		if person.slot >= 0:
+			while arena.player_names.size() <= person.slot:
+				arena.player_names.append("")
+			arena.player_names[person.slot] = person.name
+	arena.queue_redraw()
 	code_field.text = room.code
 	entry_card.hide()
 	waiting_card.show()
@@ -168,7 +175,7 @@ func _room_changed(room: Dictionary) -> void:
 	start_button.disabled = not host or playing or connected_count < 2
 	leave_button.disabled = false
 	if room.phase == "results" and not client.game.is_empty():
-		status_label.text = "Round over: %s. The host can start another round." % client.game.result
+		status_label.text = "Round over: %s. The host can start another round." % arena.round_result_text()
 	elif room.phase == "lobby":
 		status_label.text = "Waiting for 2–6 players."
 
@@ -216,7 +223,7 @@ func _game_changed(snapshot: Dictionary) -> void:
 		arena.walk_phase[i] = 0.0
 	arena.queue_redraw()
 	if not client.room.is_empty() and client.room.phase == "results":
-		status_label.text = "Round over: %s. The host can start another round." % game.result
+		status_label.text = "Round over: %s. The host can start another round." % arena.round_result_text()
 
 
 func _physics_process(delta: float) -> void:
@@ -255,6 +262,7 @@ func _show_error(message: String) -> void:
 func _left_room() -> void:
 	lobby.show()
 	arena.hide()
+	arena.player_names.clear()
 	waiting_card.hide()
 	entry_card.show()
 	room_label.text = ""
