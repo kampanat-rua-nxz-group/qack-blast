@@ -78,16 +78,26 @@ func run_checks(app) -> void:
 	room.phase = "results"
 	app.client.accept(registry.room_view(room))
 	app.client.accept(registry.game_view(room))
-	check(app.lobby.visible and app.status_label.text.contains("Duck#1 WINS"), "result returns to lobby with winner nickname")
-	check(app.arena.round_result_text() == "Duck#1 WINS", "arena result shows winner nickname")
+	check(app.results.visible and not app.lobby.visible and not app.arena.visible, "result switches to dedicated screen")
+	check(app.results.find_child("Outcome", true, false).text.contains("Duck#1 WINS"), "final snapshot shows winner nickname")
+	check(app.results.find_child("RoomCode", true, false).text == result.code, "results retain shareable room code")
+	check(app.results.change_map_requested.get_connections().size() == 1 and app.results.play_again_requested.get_connections().size() == 1, "results actions connect to online app")
+	check(registry.choose_map(10, "pond"), "host changes map after round")
+	app.client.accept(registry.room_view(room))
+	check(app.results.find_child("SelectedMap", true, false).text.contains("Lily Pond"), "results update selected map")
+	app.client.accept({"type": "error", "message": "Action rejected"})
+	check(app.results.find_child("Status", true, false).text == "Action rejected" and app.results.visible, "results show rejected command")
 	for peer_id in [30, 40, 50, 60]:
 		check(registry.join_room(peer_id, result.code, "Duck").ok, "another player joins before six-player rematch")
 	check(registry.start_round(10), "host starts six-player rematch")
 	app.client.accept(registry.room_view(room))
 	app.client.accept(registry.game_view(room))
+	check(app.arena.visible and not app.lobby.visible and not app.results.visible, "rematch goes directly to arena")
 	check(app.arena.game.board.size() == 13 and app.arena.game.board[0].size() == 15, "six-player snapshot uses enlarged board")
 	check(app.arena.game.players.size() == 6 and app.arena.game.tile_at(app.arena.game.players[5].pos) == Vector2i(7, 11), "sixth player reaches client with lower spawn")
 	check(app.arena.player_label(5) == "Duck#5", "rematch cards follow the new six-player lineup")
+	app.client.accept({"type": "left"})
+	check(app.lobby.visible and not app.arena.visible and not app.results.visible and app.entry_card.visible, "leaving returns to room entry")
 	finish()
 
 

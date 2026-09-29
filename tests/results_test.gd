@@ -25,6 +25,8 @@ func run_checks(results) -> void:
 		{"id": 7, "name": "Late", "connected": true, "wins": 0, "kills": 0},
 	]}
 	results.present(room, {"round_over": false, "result": "PLAYER 1 WINS"}, 1)
+	await process_frame
+	check(results.find_child("ResultsCard", true, false).get_global_rect().end.y <= 664.0, "results card fits above footer")
 	check(results.find_child("RoomCode", true, false).text == "QACK42", "results show room code")
 	check(results.find_child("Outcome", true, false).text == "Round complete", "results wait for final game snapshot")
 	check(results.find_child("SelectedMap", true, false).text.contains("Nightfall"), "results show selected map")
@@ -34,6 +36,9 @@ func run_checks(results) -> void:
 	for row in rows.get_children():
 		names.append(row.get_node("Name").text)
 	check(names == ["Leader", "Offline (offline)", "Host (host)", "Tie A (offline)", "Tie B (offline)", "Another (offline)", "Late"], "leaderboard sorts wins, kills, then roster order")
+	var first_row = rows.get_child(0)
+	results.present(room, {"round_over": false, "result": "PLAYER 1 WINS"}, 1)
+	check(rows.get_child(0) == first_row, "unchanged roster keeps leaderboard rows stable")
 	check(not results.find_child("ChangeMapButton", true, false).disabled and not results.find_child("PlayAgainButton", true, false).disabled, "host can change map and replay")
 	var copy_button = results.find_child("CopyCodeButton", true, false)
 	check(copy_button != null, "results have copy code button")

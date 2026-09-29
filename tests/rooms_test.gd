@@ -53,7 +53,10 @@ func _initialize() -> void:
 	room.game.resolve_round()
 	registry.tick(0.0)
 	check(room.people[2].scores.wins == 1, "winner score persists on participant record")
+	check(not registry.choose_map(30, "frost") and not registry.start_round(30), "guest cannot change map or replay during results")
+	check(registry.choose_map(20, "frost"), "new host changes map during results")
 	check(registry.start_round(20), "new host starts a rematch")
+	check(room.code == code and room.people.size() == 7 and room.game.wall_mode == "frost", "rematch keeps room and uses chosen map")
 	check(room.game.scores[1].wins == 1, "rematch carries the surviving participant's score")
 	for peer_id in [20, 30, 40, 50, 60, 70]:
 		registry.leave(peer_id)
