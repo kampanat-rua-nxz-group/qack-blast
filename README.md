@@ -17,7 +17,7 @@ It listens on `127.0.0.1:9080` by default. To change this, add `-- --port=9080 -
 python3 -m http.server 8765 --bind 127.0.0.1 --directory build/web
 ```
 
-Open `http://127.0.0.1:8765` in separate browser windows. One player enters a nickname and creates a room; the waiting lobby shows the six-character code with a copy button, and the others enter it to join. The host chooses Classic, Random, Lily Pond, Frost Garden, or Nightfall and starts the round once at least two players have joined. Each window controls its own duck with **WASD** or **Arrow keys** and plants a bomb with **Space** or **Enter**. The host starts the next round from the lobby after a result.
+Open `http://127.0.0.1:8765` in separate browser windows. One player enters a nickname and creates a room; the waiting lobby shows the six-character code with a copy button, and the others enter it to join. The host chooses Classic, Random, Lily Pond, Frost Garden, or Nightfall and starts the round once at least two players have joined. Each window controls its own duck with **WASD** or **Arrow keys** and plants a bomb with **Space** or **Enter**. After a round, everyone sees a results screen with the leaderboard and a copyable room code. The host can change the map or select **Play Again** there; all players stay in the same room.
 
 Each map has its own effect and crate pickup. Classic keeps the bomb-capacity and blast-range upgrades. Random rerolls permanent walls each round and can drop a Mystery item that grants one of those upgrades. Lily Pond has shallow water that slows movement and a Speed item that boosts movement everywhere. Frost Garden has ice that slides ducks one extra tile and a Bomb Kick item: walk into a bomb to send it toward the next wall, crate, bomb, or arena edge. Nightfall has a soft spotlight around each duck and a Sight item that widens it. Its permanent walls reshuffle at one and two minutes, avoiding ducks, bombs, and pickups.
 
@@ -46,6 +46,7 @@ The round rules support 2–6 players, Wins/Kills, chain explosions, and pickups
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script tests/rooms_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script tests/network_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script tests/online_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script tests/results_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script tests/connection_test.gd
 ```
 

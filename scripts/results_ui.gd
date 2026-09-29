@@ -10,6 +10,8 @@ const Ui = preload("res://scripts/lobby_ui.gd")
 
 var room_code: String = ""
 var feedback: String = ""
+var displayed_people: Array = []
+var displayed_host := -1
 var room_code_label: Label
 var outcome_label: Label
 var map_label: Label
@@ -41,7 +43,7 @@ func _ready() -> void:
 	column.add_child(headings)
 	_add_score_cells(headings, "#", "PLAYER", "WINS", "KILLS")
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size.y = 246
+	scroll.custom_minimum_size.y = 200
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(scroll)
 	leaderboard_rows = VBoxContainer.new()
@@ -70,14 +72,38 @@ func present(room: Dictionary, game: Dictionary, person_id: int) -> void:
 	room_code = str(room.get("code", ""))
 	room_code_label.text = room_code
 	map_label.text = "MAP: %s" % ArenaGame.MAP_NAMES.get(room.get("wall_mode", "fixed"), "Classic")
-	outcome_label.text = str(game.get("result", "")) if game.get("round_over", false) and not str(game.get("result", "")).is_empty() else "Round complete"
 	var people: Array = room.get("people", [])
-	var entries: Array = []
+	outcome_label.text = _outcome_text(game, people)
 	var connected_count := 0
+	for person in people:
+		if person.connected:
+			connected_count += 1
+	if people != displayed_people or room.host != displayed_host:
+		_render_leaderboard(people, room.host)
+		displayed_people = people.duplicate(true)
+		displayed_host = room.host
+	var host: bool = room.host == person_id
+	map_button.disabled = not host
+	replay_button.disabled = not host or connected_count < 2
+	status_label.text = feedback if not feedback.is_empty() else "Choose a map or play again." if host else "Waiting for the host to start the next round."
+
+
+func _outcome_text(game: Dictionary, people: Array) -> String:
+	var outcome := str(game.get("result", ""))
+	if not game.get("round_over", false) or outcome.is_empty():
+		return "Round complete"
+	if outcome.begins_with("PLAYER ") and outcome.ends_with(" WINS"):
+		var slot := outcome.trim_prefix("PLAYER ").trim_suffix(" WINS").to_int() - 1
+		for person in people:
+			if person.slot == slot:
+				return "%s WINS" % person.name
+	return outcome
+
+
+func _render_leaderboard(people: Array, host_id: int) -> void:
+	var entries: Array = []
 	for i in range(people.size()):
 		entries.append({"person": people[i], "index": i})
-		if people[i].connected:
-			connected_count += 1
 	entries.sort_custom(_entry_before)
 	for row in leaderboard_rows.get_children():
 		leaderboard_rows.remove_child(row)
@@ -85,7 +111,7 @@ func present(room: Dictionary, game: Dictionary, person_id: int) -> void:
 	for i in range(entries.size()):
 		var person: Dictionary = entries[i].person
 		var name: String = str(person.name)
-		if person.id == room.host:
+		if person.id == host_id:
 			name += " (host)"
 		if not person.connected:
 			name += " (offline)"
@@ -93,10 +119,6 @@ func present(room: Dictionary, game: Dictionary, person_id: int) -> void:
 		row.name = "ScoreRow"
 		leaderboard_rows.add_child(row)
 		_add_score_cells(row, str(i + 1), name, str(person.wins), str(person.kills))
-	var host: bool = room.host == person_id
-	map_button.disabled = not host
-	replay_button.disabled = not host or connected_count < 2
-	status_label.text = feedback if not feedback.is_empty() else "Choose a map or play again." if host else "Waiting for the host to start the next round."
 
 
 func show_error(message: String) -> void:

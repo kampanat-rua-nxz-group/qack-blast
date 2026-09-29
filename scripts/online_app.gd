@@ -5,10 +5,12 @@ const ArenaGame = preload("res://scripts/arena_game.gd")
 const ArenaScene = preload("res://scenes/arena.tscn")
 const LobbyArt = preload("res://scripts/lobby_art.gd")
 const Ui = preload("res://scripts/lobby_ui.gd")
+const ResultsScene = preload("res://scenes/results.tscn")
 
 var client = RoomClient.new()
 var arena: Node2D
 var lobby: Control
+var results: Control
 var server_url := RoomClient.DEFAULT_SERVER_URL
 var name_field: LineEdit
 var code_field: LineEdit
@@ -44,6 +46,12 @@ func _ready() -> void:
 	client.left_room.connect(_left_room)
 	client.transport_disconnected.connect(_disconnected)
 	build_lobby()
+	results = ResultsScene.instantiate()
+	add_child(results)
+	results.hide()
+	results.change_map_requested.connect(_change_map)
+	results.play_again_requested.connect(func(): client.send({"type": "start"}))
+	results.leave_requested.connect(func(): client.send({"type": "leave"}))
 
 
 func web_server_param() -> String:
@@ -148,8 +156,12 @@ func _connected() -> void:
 
 func _room_changed(room: Dictionary) -> void:
 	var playing: bool = room.phase == "playing"
-	lobby.visible = not playing
+	var showing_results: bool = room.phase == "results"
+	if showing_results and not results.visible:
+		results.clear_feedback()
+	lobby.visible = not playing and not showing_results
 	arena.visible = playing
+	results.visible = showing_results
 	arena.player_names.clear()
 	for person in room.people:
 		if person.slot >= 0:
@@ -178,6 +190,8 @@ func _room_changed(room: Dictionary) -> void:
 		status_label.text = "Round over: %s. The host can start another round." % arena.round_result_text()
 	elif room.phase == "lobby":
 		status_label.text = "Waiting for 2–6 players."
+	if showing_results:
+		results.present(room, client.game, client.person_id)
 
 
 func _game_changed(snapshot: Dictionary) -> void:
@@ -224,6 +238,7 @@ func _game_changed(snapshot: Dictionary) -> void:
 	arena.queue_redraw()
 	if not client.room.is_empty() and client.room.phase == "results":
 		status_label.text = "Round over: %s. The host can start another round." % arena.round_result_text()
+		results.present(client.room, snapshot, client.person_id)
 
 
 func _physics_process(delta: float) -> void:
@@ -256,13 +271,18 @@ func _change_map() -> void:
 
 func _show_error(message: String) -> void:
 	pending_request = {}
-	status_label.text = message
+	if results.visible:
+		results.show_error(message)
+	else:
+		status_label.text = message
 
 
 func _left_room() -> void:
 	lobby.show()
 	arena.hide()
 	arena.player_names.clear()
+	results.hide()
+	results.clear_feedback()
 	waiting_card.hide()
 	entry_card.show()
 	room_label.text = ""
