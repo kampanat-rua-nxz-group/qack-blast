@@ -58,7 +58,38 @@ func _initialize() -> void:
 	for peer_id in [20, 30, 40, 50, 60, 70]:
 		registry.leave(peer_id)
 	check(not registry.rooms.has(code), "room and scores disappear when last peer leaves")
+	test_map_round_snapshots()
 	finish()
+
+
+func test_map_round_snapshots() -> void:
+	var Registry = load("res://scripts/room_registry.gd")
+	for mode in ["fixed", "random", "pond", "frost", "night"]:
+		var registry = Registry.new()
+		var created: Dictionary = registry.create_room(100, "A")
+		registry.join_room(200, created.code, "B")
+		check(registry.choose_map(100, mode) and registry.start_round(100), "%s starts through host selection" % mode)
+		var room: Dictionary = registry.rooms[created.code]
+		var game = room.game
+		var special: int = {"fixed": 0, "random": 3, "pond": 4, "frost": 5, "night": 2}[mode]
+		game.pickups[game.tile_at(game.players[0].pos)] = special
+		game.round_elapsed = 180.0
+		game.schedule_hazards(180.0)
+		var snapshot: Dictionary = JSON.parse_string(JSON.stringify(registry.game_view(room)))
+		check(snapshot.pickups.any(func(pickup): return pickup.kind == special), "%s special pickup reaches snapshot" % mode)
+		check(not snapshot.bombs.is_empty() if mode == "fixed" else not snapshot.hazards.is_empty(), "%s sudden-death warning reaches snapshot" % mode)
+		registry.tick(0.0)
+		check(room.phase == "playing", "%s round continues with multiple ducks alive" % mode)
+		game.players[0].alive = false
+		game.resolve_round()
+		registry.tick(0.0)
+		check(room.phase == "results" and game.result == "PLAYER 2 WINS", "%s resolves after one survivor" % mode)
+		check(registry.start_round(100), "%s starts rematch" % mode)
+		room.game.players[0].alive = false
+		room.game.players[1].alive = false
+		room.game.resolve_round()
+		registry.tick(0.0)
+		check(room.phase == "results" and room.game.result == "DRAW", "%s draws when last ducks die together" % mode)
 
 
 func check(condition: bool, message: String) -> void:

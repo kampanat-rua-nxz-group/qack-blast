@@ -101,6 +101,8 @@ func _draw() -> void:
 	rounded_box(Rect2(704, 24, 114, 38), Color("ffe1a6"), 19.0)
 	centered_text("%s  %dP" % ["ONLINE" if networked else "LOCAL", game.players.size()], Vector2(761, 49), 15, Color("73512d"))
 	centered_text("%s  %d:%02d" % [ArenaGame.MAP_NAMES[game.wall_mode].to_upper(), int(game.round_elapsed) / 60, int(game.round_elapsed) % 60], Vector2(635, 49), 13, Color("73512d"))
+	if game.round_elapsed >= game.SUDDEN_DEATH_START and not game.round_over:
+		centered_text("SUDDEN DEATH", Vector2(635, 68), 11, Color("c35162"))
 	if selected_wall_mode != game.wall_mode:
 		centered_text("NEXT: %s" % ArenaGame.MAP_NAMES[selected_wall_mode].to_upper(), Vector2(500, 49), 12, Color("92536b"))
 	rounded_box(Rect2(136, 76, 688, 584), colors.frame, 13.0)
@@ -355,4 +357,8 @@ func draw_player_card(i: int) -> void:
 	centered_text("BOMB %d   FIRE %d" % [game.players[i].bomb_limit, game.players[i].range], Vector2(x + 60, y + (130 if compact else 149)), 12, Color("827b8b"))
 	if game.wall_mode == "night":
 		centered_text("SIGHT %d" % game.players[i].vision, Vector2(x + 60, y + (148 if compact else 166)), 12, Color("827b8b"))
+	elif game.wall_mode == "pond":
+		centered_text("SPEED %d%%" % int((1.0 + game.players[i].speed_bonus) * 100), Vector2(x + 60, y + (148 if compact else 166)), 12, Color("827b8b"))
+	elif game.wall_mode == "frost":
+		centered_text("BOMB KICK %s" % ("ON" if game.players[i].can_kick else "OFF"), Vector2(x + 60, y + (148 if compact else 166)), 12, Color("827b8b"))
 	centered_text("WINS %d   KILLS %d" % [game.scores[i].wins, game.scores[i].kills], Vector2(x + 60, y + (166 if compact else 181)), 12, Color("827b8b"))
