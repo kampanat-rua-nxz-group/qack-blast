@@ -34,6 +34,8 @@ func _initialize() -> void:
 	test_night_drops_vision()
 	test_random_mystery_and_bursts()
 	test_random_burst_chain()
+	test_map_specific_pickup_drops()
+	test_pond_water_speed_and_flood()
 	test_win_and_kill_persist()
 	test_chain_kill_belongs_to_triggered_bomb()
 	test_closer_blast_gets_kill()
@@ -782,6 +784,62 @@ func test_random_burst_chain() -> void:
 	game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
 	check(game.board[3][3] == game.OPEN, "random burst clears a marked crate")
 	check(game.bombs.is_empty() and has_flame(game, Vector2i(3, 4), 0), "random burst triggers the bomb on a marked tile")
+
+
+func test_map_specific_pickup_drops() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	for mode in ["random", "pond"]:
+		game.wall_mode = mode
+		var found_special := false
+		for seed_value in range(100):
+			game.rng.seed = seed_value
+			game.new_round()
+			game.board[1][2] = game.CRATE
+			game.place_bomb(0)
+			game.update_bombs(game.FUSE)
+			var kind: int = game.pickups.get(Vector2i(2, 1), -1)
+			if kind < 0:
+				continue
+			check(kind in ([0, 1, 3] if mode == "random" else [0, 1, 4]), "%s only drops its own special item" % mode)
+			if kind == (3 if mode == "random" else 4):
+				found_special = true
+		check(found_special, "%s can drop its special item" % mode)
+
+
+func test_pond_water_speed_and_flood() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "pond"
+	game.new_round()
+	if game.get("terrain") == null:
+		check(false, "pond provides shallow-water terrain")
+		return
+	clear_crates(game)
+	var spawn: Vector2i = game.tile_at(game.players[0].pos)
+	check(game.terrain[spawn.y][spawn.x] == 0, "pond spawn starts dry")
+	game.terrain[spawn.y][spawn.x] = 1
+	var start: Vector2 = game.players[0].pos
+	game.move_player(0, 0.1, Vector2.RIGHT)
+	check(is_equal_approx(game.players[0].pos.x - start.x, 15.04), "shallow water slows movement to 80 percent")
+	game.players[0].pos = start
+	game.move_targets[0] = Vector2.ZERO
+	game.pickups[spawn] = 4
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(is_equal_approx(game.players[0].speed_bonus, 0.25), "speed pickup adds 25 percent")
+	game.pickups[spawn] = 4
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(is_equal_approx(game.players[0].speed_bonus, 0.5), "speed pickup caps at 50 percent")
+	game.hazards.append({"kind": "flood", "tiles": [spawn], "time": 5.0})
+	game.step(0.1, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.players[0].alive, "flood warning does not kill early")
+	game.step(4.9, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.board[spawn.y][spawn.x] == 3 and not game.players[0].alive, "flood turns ring into lethal deep water")
+	check(game.solid(spawn, 1), "deep water remains blocked")
+	game.player_count = 6
+	game.new_round()
+	check(game.terrain.size() == 13 and game.terrain[0].size() == 15, "large pond board builds terrain")
+	for player in game.players:
+		var tile: Vector2i = game.tile_at(player.pos)
+		check(game.terrain[tile.y][tile.x] == 0, "large pond spawns stay dry")
 
 
 func clear_crates(game) -> void:

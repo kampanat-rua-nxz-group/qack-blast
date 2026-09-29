@@ -110,6 +110,10 @@ func _draw() -> void:
 			var tile := Vector2i(x, y)
 			var rect := Rect2(game.ORIGIN + Vector2(x, y) * game.CELL, Vector2.ONE * game.CELL)
 			draw_rect(rect, colors.floor if (x + y) % 2 == 0 else colors.floor_alt)
+			if game.board[y][x] == game.DEEP_WATER:
+				draw_rect(rect, Color("3b88b3"))
+			elif game.terrain[y][x] == 1:
+				draw_rect(rect.grow(-3.0), Color("92d9dd"))
 			if game.board[y][x] == game.WALL:
 				draw_wall(rect, colors)
 			elif game.board[y][x] == game.CRATE:
@@ -263,6 +267,11 @@ func draw_pickup(pos: Vector2, kind: int) -> void:
 		draw_circle(pos, 17.0, Color("f4accb"))
 		draw_circle(pos, 12.0, Color("ffe4f0"))
 		centered_text("?", pos + Vector2(0, 7), 21, Color("944d75"))
+		return
+	if kind == game.PICKUP_SPEED:
+		draw_circle(pos, 17.0, Color("88dbac"))
+		draw_circle(pos, 12.0, Color("ddffe9"))
+		draw_line(pos + Vector2(-7, 4), pos + Vector2(7, -4), Color("438566"), 4.0, true)
 		return
 	if kind == game.PICKUP_VISION:
 		draw_circle(pos, 17.0, Color("a2dbef"))

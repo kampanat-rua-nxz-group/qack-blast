@@ -42,6 +42,11 @@ func run_checks(app) -> void:
 	check(app.arena.game.players.size() == 2 and app.arena.game.board.size() == 11, "scene receives server snapshot")
 	check(app.arena.game.tile_at(app.arena.game.players[1].pos) == Vector2i(11, 9), "snapshot restores player positions")
 	check(app.arena.game.wall_mode == "night" and app.arena.game.players[0].vision == 1, "night vision arrives in server snapshot")
+	check(registry.game_view(room).has("terrain") and registry.game_view(room).players[0].has("speed_bonus"), "terrain and speed upgrade are included in snapshots")
+	room.game.terrain[1][1] = 1
+	room.game.players[0].speed_bonus = 0.25
+	app.client.accept(registry.game_view(room))
+	check(app.arena.game.terrain[1][1] == 1 and is_equal_approx(app.arena.game.players[0].speed_bonus, 0.25), "client restores water and speed from snapshot")
 	check(app.arena.viewer_slot == 0 and not app.arena.visible_tile(Vector2i(11, 9)), "online darkness uses the local player's slot")
 	var danger_bomb := {"tile": Vector2i(3, 3), "owner": -1, "range": 0, "time": 5.0, "danger": true}
 	room.game.bombs.append(danger_bomb)

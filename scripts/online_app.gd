@@ -177,9 +177,10 @@ func _game_changed(snapshot: Dictionary) -> void:
 	var game = arena.game
 	game.configure_map(snapshot.players.size())
 	game.board = snapshot.board
+	game.terrain = snapshot.get("terrain", [])
 	game.players.clear()
 	for player in snapshot.players:
-		game.players.append({"pos": Vector2(player.pos[0], player.pos[1]), "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "facing": player.facing})
+		game.players.append({"pos": Vector2(player.pos[0], player.pos[1]), "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.get("speed_bonus", 0.0), "facing": player.facing})
 	game.player_count = game.players.size()
 	game.bombs.clear()
 	for bomb in snapshot.bombs:

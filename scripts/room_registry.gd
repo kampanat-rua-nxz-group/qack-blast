@@ -182,7 +182,7 @@ func game_view(room: Dictionary) -> Dictionary:
 	var game = room.game
 	var players := []
 	for player in game.players:
-		players.append({"pos": [player.pos.x, player.pos.y], "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "facing": player.facing})
+		players.append({"pos": [player.pos.x, player.pos.y], "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.speed_bonus, "facing": player.facing})
 	var bombs := []
 	for bomb in game.bombs:
 		bombs.append({"tile": [bomb.tile.x, bomb.tile.y], "owner": bomb.owner, "time": bomb.time, "danger": bomb.get("danger", false)})
@@ -198,7 +198,7 @@ func game_view(room: Dictionary) -> Dictionary:
 		for tile in hazard.tiles:
 			tiles.append([tile.x, tile.y])
 		hazards.append({"kind": hazard.kind, "tiles": tiles, "time": hazard.time})
-	return {"type": "game", "board": game.board, "players": players, "bombs": bombs, "hazards": hazards, "flames": flames, "pickups": pickups, "scores": game.scores, "round_elapsed": game.round_elapsed, "round_over": game.round_over, "result": game.result, "wall_mode": game.wall_mode}
+	return {"type": "game", "board": game.board, "terrain": game.terrain, "players": players, "bombs": bombs, "hazards": hazards, "flames": flames, "pickups": pickups, "scores": game.scores, "round_elapsed": game.round_elapsed, "round_over": game.round_over, "result": game.result, "wall_mode": game.wall_mode}
 
 
 func make_code() -> String:
