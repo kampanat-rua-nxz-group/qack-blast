@@ -7,7 +7,7 @@ func _draw() -> void:
 	draw_circle(Vector2(30, 35), 104.0, Color("ffe8d9"))
 	draw_circle(Vector2(934, 678), 140.0, Color("e4f5ed"))
 	draw_string(font, Vector2(142, 54), "QACK BLAST", HORIZONTAL_ALIGNMENT_LEFT, -1, 31, Color("403d57"))
-	draw_string(font, Vector2(143, 78), "a tiny bomb battle for 2-4", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("867f91"))
+	draw_string(font, Vector2(143, 78), "a tiny bomb battle for 2-6", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("867f91"))
 	rounded_box(Rect2(704, 30, 114, 38), Color("ffe1a6"), 19.0)
 	centered_text("ONLINE ROOM", Vector2(761, 55), 14, Color("73512d"))
 	draw_duck(Vector2(84, 320), Color("65cfc6"))
@@ -15,7 +15,7 @@ func _draw() -> void:
 	rounded_box(Rect2(142, 667, 414, 30), Color("e7f2ed"), 15.0)
 	rounded_box(Rect2(574, 667, 244, 30), Color("f9e8ed"), 15.0)
 	centered_text("CREATE  •  JOIN  •  PLAY", Vector2(349, 688), 14, Color("366b68"))
-	centered_text("2–4 FRIENDS", Vector2(696, 688), 14, Color("92536b"))
+	centered_text("2–6 FRIENDS", Vector2(696, 688), 14, Color("92536b"))
 
 
 func rounded_box(rect: Rect2, color: Color, radius: float) -> void:
