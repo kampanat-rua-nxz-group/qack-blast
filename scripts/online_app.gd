@@ -164,7 +164,7 @@ func _room_changed(room: Dictionary) -> void:
 	room_detail_label.text = "Room %s  |  %s  |  map: %s" % [room.code, room.phase, ArenaGame.MAP_NAMES[room.wall_mode]]
 	var lines: Array[String] = []
 	for person in room.people:
-		lines.append("%s%s%s  —  Wins %d  Kills %d" % [person.name, " (host)" if person.id == room.host else "", " (offline)" if not person.connected else "", person.wins, person.kills])
+		lines.append("%s%s%s" % [person.name, " (host)" if person.id == room.host else "", " (offline)" if not person.connected else ""])
 	roster_label.text = "\n".join(lines)
 	var host: bool = room.host == client.person_id
 	var connected_count := 0
