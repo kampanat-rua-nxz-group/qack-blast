@@ -95,7 +95,7 @@ func _outcome_text(game: Dictionary, people: Array) -> String:
 	if outcome.begins_with("PLAYER ") and outcome.ends_with(" WINS"):
 		var slot := outcome.trim_prefix("PLAYER ").trim_suffix(" WINS").to_int() - 1
 		for person in people:
-			if person.slot == slot:
+			if person.get("slot", -1) == slot:
 				return "%s WINS" % person.name
 	return outcome
 
