@@ -28,6 +28,9 @@ func _initialize() -> void:
 	test_simultaneous_deaths_are_draw(game)
 	test_pickup_after_simultaneous_blasts(game)
 	test_pickup_caps()
+	test_night_vision_pickup()
+	test_night_visibility(arena)
+	test_night_drops_vision()
 	test_win_and_kill_persist()
 	test_chain_kill_belongs_to_triggered_bomb()
 	test_closer_blast_gets_kill()
@@ -39,11 +42,15 @@ func _initialize() -> void:
 	test_simultaneous_kills_get_no_wins()
 	test_score_order_uses_wins_then_kills()
 	test_three_and_four_player_rounds()
+	test_large_round_spawns()
 	test_scene_accepts_four_player_state(arena)
 	test_wall_modes()
+	test_night_wall_layout()
 	test_map_themes(arena)
 	test_wall_selection_applies_next_round(arena)
-	test_closing_hazard()
+	test_danger_bomb_waves()
+	test_danger_bomb_crosses_walls()
+	test_danger_bomb_waits_through_chain()
 	print("Arena checks: %d failure(s)" % failures)
 	quit(1 if failures else 0)
 
@@ -272,7 +279,7 @@ func test_three_and_four_player_rounds() -> void:
 	check(game.players.size() == 4 and game.scores.size() == 4, "four players have persistent score entries")
 	if game.players.size() != 4 or game.scores.size() != 4:
 		return
-	var spawns := [Vector2i(1, 1), Vector2i(11, 9), Vector2i(11, 1), Vector2i(1, 9)]
+	var spawns := [Vector2i(1, 1), Vector2i(13, 11), Vector2i(13, 1), Vector2i(1, 11)]
 	for i in range(4):
 		check(game.tile_at(game.players[i].pos) == spawns[i], "player %d has a distinct corner spawn" % (i + 1))
 	game.step(0.016, [Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO], [false, false, false, false])
@@ -289,6 +296,33 @@ func test_three_and_four_player_rounds() -> void:
 	game.player_count = 2
 	game.new_round()
 	check(game.score_order().size() == 2, "rankings show active players when player count changes")
+
+
+func test_large_round_spawns() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	for count in [4, 5, 6]:
+		game.player_count = count
+		for mode in game.MAP_MODES:
+			game.wall_mode = mode
+			for seed_value in range(5):
+				game.rng.seed = seed_value
+				game.new_round()
+				check(game.board.size() == 13 and game.board[0].size() == 15, "%s %d-player board grows to 15x13" % [mode, count])
+				if mode == "pond":
+					check(game.board[4][5] == game.WALL, "pond pillars stay centered on large board")
+				elif mode == "frost":
+					check(game.board[3][4] == game.WALL, "frost pillars stay centered on large board")
+				check(game.players.size() == count, "%s creates %d players" % [mode, count])
+				var positions := {}
+				var reachable := reachable_open_tiles(game, Vector2i(1, 1))
+				for player in game.players:
+					var tile: Vector2i = game.tile_at(player.pos)
+					positions[tile] = true
+					check(reachable.has(tile), "%s %d-player seed %d connects spawn %s" % [mode, count, seed_value, tile])
+				check(positions.size() == count, "%s %d-player spawns are distinct" % [mode, count])
+	game.player_count = 2
+	game.new_round()
+	check(game.board.size() == 11 and game.board[0].size() == 13, "two-player rematch keeps original board")
 
 
 func test_scene_accepts_four_player_state(arena) -> void:
@@ -359,6 +393,25 @@ func test_wall_selection_applies_next_round(arena) -> void:
 	check(arena.game.wall_mode == "frost", "local map selection reaches frost")
 	arena._input(key)
 	arena.new_round()
+	check(arena.game.wall_mode == "night", "local map selection reaches night")
+	arena._input(key)
+	arena.new_round()
+	check(arena.game.wall_mode == "fixed", "local map selection wraps to classic")
+
+
+func test_night_wall_layout() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "night"
+	game.player_count = 4
+	var layouts := {}
+	for seed_value in range(20):
+		game.rng.seed = seed_value
+		game.new_round()
+		layouts[wall_mask(game)] = true
+		var reachable := reachable_open_tiles(game, Vector2i(1, 1))
+		for player in game.players:
+			check(reachable.has(game.tile_at(player.pos)), "night seed %d connects every spawn" % seed_value)
+	check(layouts.size() > 1, "night obstacles reroll each round")
 
 
 func test_map_themes(arena) -> void:
@@ -401,45 +454,63 @@ func reachable_open_tiles(game, start: Vector2i) -> Dictionary:
 	return visited
 
 
-func test_closing_hazard() -> void:
+func test_danger_bomb_waves() -> void:
 	var game = load("res://scripts/arena_game.gd").new()
-	check(game.has_method("is_closed") and game.has_method("warning_tiles"), "game exposes closing hazard state")
-	if not game.has_method("is_closed") or not game.has_method("warning_tiles"):
-		return
+	game.rng.seed = 7
 	game.new_round()
 	clear_crates(game)
-	game.players[0].pos = game.center(Vector2i(5, 5))
-	game.players[1].pos = game.center(Vector2i(7, 5))
 	var idle := [Vector2.ZERO, Vector2.ZERO]
 	var no_bombs := [false, false]
 	game.step(294.9, idle, no_bombs)
-	check(game.warning_tiles().is_empty() and not game.is_closed(Vector2i(1, 5)), "first ring has no warning before five-minute mark minus five seconds")
+	check(game.bombs.is_empty() and game.warning_tiles().is_empty(), "danger bombs do not appear before the warning")
 	game.step(0.1, idle, no_bombs)
-	check(game.warning_tiles().has(Vector2i(1, 5)), "first ring warns for five seconds")
+	check(game.bombs.size() == 1 and game.bombs[0].get("danger", false), "one danger bomb appears at 4:55")
+	if game.bombs.is_empty():
+		return
+	var bomb_tile: Vector2i = game.bombs[0].tile
+	check(game.warning_tiles().has(Vector2i(0, bomb_tile.y)) and game.warning_tiles().has(Vector2i(bomb_tile.x, 0)), "warning marks the entire row and column")
+	var safe_tiles: Array[Vector2i] = []
+	for y in range(1, game.HEIGHT - 1):
+		for x in range(1, game.WIDTH - 1):
+			if game.board[y][x] == game.OPEN and x != bomb_tile.x and y != bomb_tile.y:
+				safe_tiles.append(Vector2i(x, y))
+	check(safe_tiles.size() >= 2, "first wave leaves space to dodge")
+	if safe_tiles.size() < 2:
+		return
+	game.players[0].pos = game.center(safe_tiles[0])
+	game.players[1].pos = game.center(safe_tiles[1])
 	game.step(5.0, idle, no_bombs)
-	check(game.closed_layers == 1 and game.is_closed(Vector2i(1, 5)), "first ring closes at five minutes")
-	check(not game.is_closed(Vector2i(2, 5)) and not game.round_over, "interior remains safe after first ring")
-	game.step(25.0, idle, no_bombs)
-	check(game.warning_tiles().has(Vector2i(2, 5)), "second ring warns five seconds before closing")
-	game.step(5.0, idle, no_bombs)
-	check(game.closed_layers == 2 and game.is_closed(Vector2i(2, 5)) and game.is_closed(Vector2i(1, 5)), "later rings close every thirty seconds and stay dangerous")
-	var winner = load("res://scripts/arena_game.gd").new()
-	winner.new_round()
-	winner.players[1].pos = winner.center(Vector2i(5, 5))
-	winner.step(300.0, idle, no_bombs)
-	check(winner.result == "PLAYER 2 WINS" and winner.scores[1].wins == 1, "last survivor wins after a ring closes")
-	check(winner.scores[0].kills == 0 and winner.scores[1].kills == 0, "closing hazard awards no Kills")
-	var draw = load("res://scripts/arena_game.gd").new()
-	draw.new_round()
-	draw.step(300.0, idle, no_bombs)
-	check(draw.result == "DRAW" and draw.scores[0].wins == 0 and draw.scores[1].wins == 0, "simultaneous closing deaths draw without Wins")
-	check(draw.scores[0].kills == 0 and draw.scores[1].kills == 0, "simultaneous closing deaths award no Kills")
-	var skip = load("res://scripts/arena_game.gd").new()
-	skip.new_round()
-	skip.players[0].pos = skip.center(Vector2i(2, 5))
-	skip.players[1].pos = skip.center(Vector2i(10, 5))
-	skip.step(330.0, idle, no_bombs)
-	check(skip.closed_layers == 2 and skip.result == "DRAW", "large delta applies every overdue ring")
+	check(game.bombs.is_empty() and game.flames.size() > 0, "danger bomb explodes at five minutes")
+	check(not game.round_over and game.warning_tiles().is_empty(), "blast clears without closing tiles")
+	game.step(10.0, idle, no_bombs)
+	check(game.bombs.size() == 2 and game.bombs.all(func(bomb): return bomb.get("danger", false)), "second wave warns with two bombs")
+	check(game.warning_tiles().size() > 0, "second wave warning appears five seconds before its blast")
+
+
+func test_danger_bomb_crosses_walls() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.new_round()
+	clear_crates(game)
+	game.board[5][3] = game.WALL
+	game.players[0].pos = game.center(Vector2i(5, 5))
+	game.players[1].pos = game.center(Vector2i(7, 7))
+	game.bombs.append({"tile": Vector2i(1, 5), "owner": -1, "range": 0, "time": 5.0, "danger": true})
+	check(game.warning_tiles().has(Vector2i(5, 5)), "full-cross warning passes through a wall")
+	game.step(5.0, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(has_flame(game, Vector2i(5, 5), -1), "danger blast reaches beyond a permanent wall")
+	check(game.result == "PLAYER 2 WINS" and game.scores[1].wins == 1, "survivor wins after a danger bomb blast")
+	check(game.scores[0].kills == 0 and game.scores[1].kills == 0, "neutral danger bomb awards no Kill")
+
+
+func test_danger_bomb_waits_through_chain() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.new_round()
+	clear_crates(game)
+	var danger_bomb := {"tile": Vector2i(3, 3), "owner": -1, "range": 0, "time": 5.0, "danger": true}
+	game.bombs.append(danger_bomb)
+	game.bombs.append({"tile": Vector2i(3, 4), "owner": 0, "range": 1, "time": 0.0})
+	game.update_bombs(0.1)
+	check(game.bombs.has(danger_bomb) and not has_flame(game, Vector2i(8, 3), -1), "player bomb cannot trigger danger bomb before its warning ends")
 
 
 func test_one_press_moves_one_tile(arena) -> void:
@@ -578,6 +649,59 @@ func test_pickup_caps() -> void:
 	game.pickups[spawn] = game.PICKUP_BLAST_RANGE
 	game.step(0.016, idle, no_bombs)
 	check(game.players[0].range == 6 and not game.pickups.has(spawn), "extra range pickup cannot exceed cap")
+
+
+func test_night_vision_pickup() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "night"
+	game.rng.seed = 4
+	game.new_round()
+	check(game.players[0].vision == 1, "night players start with one tile of sight")
+	var spawn := Vector2i(1, 1)
+	game.pickups[spawn] = game.PICKUP_VISION
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.players[0].vision == 2 and not game.pickups.has(spawn), "vision pickup adds one tile and is consumed")
+	game.pickups[spawn] = game.PICKUP_VISION
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.players[0].vision == 3, "vision pickups stack")
+
+
+func test_night_visibility(arena) -> void:
+	arena.selected_wall_mode = "night"
+	arena.new_round()
+	check(arena.visible_tile(Vector2i(2, 2)), "diagonal tile inside first ring is visible")
+	check(not arena.visible_tile(Vector2i(3, 3)), "second ring begins hidden")
+	arena.game.players[0].vision = 2
+	check(arena.visible_tile(Vector2i(3, 3)), "vision upgrade reveals second ring")
+	arena.networked = true
+	arena.viewer_slot = 0
+	check(not arena.visible_tile(Vector2i(11, 9)), "online opponent region stays hidden")
+	arena.viewer_slot = 1
+	check(arena.visible_tile(Vector2i(11, 9)), "online viewer sees own region")
+	arena.game.players[1].alive = false
+	check(arena.visible_tile(Vector2i(1, 1)), "eliminated player can watch the rest of the round")
+	arena.game.players[1].alive = true
+	arena.networked = false
+	arena.viewer_slot = -1
+	check(arena.visible_tile(Vector2i(1, 1)) and arena.visible_tile(Vector2i(11, 9)), "local players share visible regions")
+	arena.selected_wall_mode = "fixed"
+	arena.new_round()
+
+
+func test_night_drops_vision() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "night"
+	var found_vision := false
+	for seed_value in range(100):
+		game.rng.seed = seed_value
+		game.new_round()
+		game.board[1][2] = game.CRATE
+		game.place_bomb(0)
+		game.update_bombs(game.FUSE)
+		found_vision = game.pickups.get(Vector2i(2, 1), -1) == game.PICKUP_VISION
+		if found_vision:
+			break
+	check(found_vision, "night map can drop vision items")
 
 
 func clear_crates(game) -> void:

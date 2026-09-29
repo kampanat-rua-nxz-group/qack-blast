@@ -33,9 +33,9 @@ A classic competitive bomb-placing game for 2–4 friends, played online in a we
 ## Time and Resolution
 
 - A typical round targets roughly 4–5 minutes.
-- At 5 minutes, walkable tiles begin closing from the outer edge toward the center one ring at a time, 1 tile deep along the closing edge, repeating every 30 seconds.
-- Before each ring closes, its tiles flash once per second, 5 times in total (a 5-second warning), then close on all sides simultaneously so no corner gains an advantage. Closed tiles become permanently dangerous; players on them are eliminated immediately.
-- If a closure eliminates the final survivors at the same time, the round is a draw.
+- At 4:55, a neutral danger bomb appears on a random open tile. Its entire row and column flash for five seconds. At 5:00, it explodes across those tiles, passing through permanent walls, then clears.
+- Another wave explodes every 15 seconds. Each wave adds one randomly placed bomb: two in the second wave, three in the third, and so on, limited by the available open tiles. All bombs in a wave share the five-second warning and explode together. Their blasts can destroy crates and trigger player bombs; danger bombs cannot be triggered before their warnings end.
+- Danger bombs continue while multiple players survive; there is no fixed round end time. If a wave eliminates the final survivors at the same time, the round is a draw.
 - The last survivor earns 1 Win. If the final players are eliminated together in a draw, no one earns a Win.
 - Eliminated players can keep watching the match.
 
@@ -46,7 +46,7 @@ A classic competitive bomb-placing game for 2–4 friends, played online in a we
 - In a chain reaction, the Kill goes to the owner of the bomb whose blast touched the eliminated player, not to whoever started the chain. If that bomb eliminates several opponents, its owner earns 1 Kill per player.
 - If blasts from several players touch a target at the same moment, the Kill goes to the owner of the bomb nearest the target, measured in tiles along the blast line from bomb to target.
 - If the simultaneous bombs are equally distant from the target, that Kill is a tie and no one earns it.
-- Self-elimination or elimination by the closing arena awards no Kill.
+- Self-elimination or elimination by a neutral danger bomb awards no Kill.
 - The scoreboard sorts by Wins descending, then by Kills descending.
 - Previous score history stays visible in the room when a player disconnects and rejoins, but the rejoining player starts accumulating their own score from zero. All scores end when the room closes.
 
@@ -75,4 +75,4 @@ Includes private rooms, room codes, nicknames, Free-for-All play, one map size w
 
 ## Points to Confirm Before Building the Systems
 
-- Verify during playtesting that the 5-second warning, flashing once per second, is clearly visible.
+- Verify during playtesting that the danger bomb's 5-second warning and full-row-and-column blast are clearly visible.

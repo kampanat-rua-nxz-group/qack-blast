@@ -122,7 +122,7 @@ func build_waiting_card() -> void:
 	copy_button.name = "CopyCodeButton"
 	copy_button.pressed.connect(_copy_code)
 	Ui.spacer(column, 8)
-	Ui.label(column, "The host starts the round once 2–4 players have joined.", 13, Ui.MUTED)
+	Ui.label(column, "The host starts the round once 2–6 players have joined.", 13, Ui.MUTED)
 
 
 func _copy_code() -> void:
@@ -170,19 +170,20 @@ func _room_changed(room: Dictionary) -> void:
 	if room.phase == "results" and not client.game.is_empty():
 		status_label.text = "Round over: %s. The host can start another round." % client.game.result
 	elif room.phase == "lobby":
-		status_label.text = "Waiting for 2–4 players."
+		status_label.text = "Waiting for 2–6 players."
 
 
 func _game_changed(snapshot: Dictionary) -> void:
 	var game = arena.game
+	game.configure_map(snapshot.players.size())
 	game.board = snapshot.board
 	game.players.clear()
 	for player in snapshot.players:
-		game.players.append({"pos": Vector2(player.pos[0], player.pos[1]), "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "facing": player.facing})
+		game.players.append({"pos": Vector2(player.pos[0], player.pos[1]), "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "facing": player.facing})
 	game.player_count = game.players.size()
 	game.bombs.clear()
 	for bomb in snapshot.bombs:
-		game.bombs.append({"tile": Vector2i(bomb.tile[0], bomb.tile[1]), "owner": bomb.owner, "time": bomb.time})
+		game.bombs.append({"tile": Vector2i(bomb.tile[0], bomb.tile[1]), "owner": bomb.owner, "time": bomb.time, "danger": bomb.get("danger", false)})
 	game.flames.clear()
 	for flame in snapshot.flames:
 		game.flames.append({"tile": Vector2i(flame.tile[0], flame.tile[1]), "owner": flame.owner, "time": flame.time})
@@ -191,10 +192,15 @@ func _game_changed(snapshot: Dictionary) -> void:
 		game.pickups[Vector2i(pickup.tile[0], pickup.tile[1])] = pickup.kind
 	game.scores = snapshot.scores
 	game.round_elapsed = snapshot.round_elapsed
-	game.closed_layers = snapshot.closed_layers
 	game.round_over = snapshot.round_over
 	game.result = snapshot.result
 	game.wall_mode = snapshot.wall_mode
+	arena.viewer_slot = -1
+	if not client.room.is_empty():
+		for person in client.room.people:
+			if person.id == client.person_id:
+				arena.viewer_slot = person.slot
+				break
 	arena.visual_facing.resize(game.players.size())
 	arena.walk_phase.resize(game.players.size())
 	for i in range(game.players.size()):

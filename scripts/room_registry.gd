@@ -2,7 +2,7 @@ extends RefCounted
 
 const ArenaGame = preload("res://scripts/arena_game.gd")
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-const MAX_CONNECTED = 4
+const MAX_CONNECTED = 6
 const DISCONNECT_GRACE = 30.0
 
 var rng := RandomNumberGenerator.new()
@@ -182,17 +182,17 @@ func game_view(room: Dictionary) -> Dictionary:
 	var game = room.game
 	var players := []
 	for player in game.players:
-		players.append({"pos": [player.pos.x, player.pos.y], "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "facing": player.facing})
+		players.append({"pos": [player.pos.x, player.pos.y], "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "facing": player.facing})
 	var bombs := []
 	for bomb in game.bombs:
-		bombs.append({"tile": [bomb.tile.x, bomb.tile.y], "owner": bomb.owner, "time": bomb.time})
+		bombs.append({"tile": [bomb.tile.x, bomb.tile.y], "owner": bomb.owner, "time": bomb.time, "danger": bomb.get("danger", false)})
 	var flames := []
 	for flame in game.flames:
 		flames.append({"tile": [flame.tile.x, flame.tile.y], "owner": flame.owner, "time": flame.time})
 	var pickups := []
 	for tile in game.pickups:
 		pickups.append({"tile": [tile.x, tile.y], "kind": game.pickups[tile]})
-	return {"type": "game", "board": game.board, "players": players, "bombs": bombs, "flames": flames, "pickups": pickups, "scores": game.scores, "round_elapsed": game.round_elapsed, "closed_layers": game.closed_layers, "round_over": game.round_over, "result": game.result, "wall_mode": game.wall_mode}
+	return {"type": "game", "board": game.board, "players": players, "bombs": bombs, "flames": flames, "pickups": pickups, "scores": game.scores, "round_elapsed": game.round_elapsed, "round_over": game.round_over, "result": game.result, "wall_mode": game.wall_mode}
 
 
 func make_code() -> String:

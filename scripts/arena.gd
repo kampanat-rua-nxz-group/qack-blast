@@ -1,7 +1,7 @@
 extends Node2D
 
 const ArenaGame = preload("res://scripts/arena_game.gd")
-const COLORS = [Color("65cfc6"), Color("f58fb1"), Color("f4c66c"), Color("a995e8")]
+const COLORS = [Color("65cfc6"), Color("f58fb1"), Color("f4c66c"), Color("a995e8"), Color("7abf70"), Color("e58a5e")]
 
 var game = ArenaGame.new()
 var previous_drop := [false, false]
@@ -10,6 +10,7 @@ var visual_facing := [0.0, 0.0]
 var walk_phase := [0.0, 0.0]
 var selected_wall_mode := "fixed"
 var networked := false
+var viewer_slot := -1
 
 
 func _ready() -> void:
@@ -96,7 +97,7 @@ func _draw() -> void:
 	draw_circle(Vector2(30, 35), 104.0, Color("ffe8d9"))
 	draw_circle(Vector2(934, 678), 140.0, Color("e4f5ed"))
 	draw_string(font, Vector2(142, 43), "QACK BLAST", HORIZONTAL_ALIGNMENT_LEFT, -1, 31, Color("403d57"))
-	draw_string(font, Vector2(143, 66), "a tiny bomb battle for 2-4", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("867f91"))
+	draw_string(font, Vector2(143, 66), "a tiny bomb battle for 2-6", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("867f91"))
 	rounded_box(Rect2(704, 24, 114, 38), Color("ffe1a6"), 19.0)
 	centered_text("%s  %dP" % ["ONLINE" if networked else "LOCAL", game.players.size()], Vector2(761, 49), 15, Color("73512d"))
 	centered_text("%s  %d:%02d" % [ArenaGame.MAP_NAMES[game.wall_mode].to_upper(), int(game.round_elapsed) / 60, int(game.round_elapsed) % 60], Vector2(635, 49), 13, Color("73512d"))
@@ -117,15 +118,9 @@ func _draw() -> void:
 				draw_circle(game.center(tile) + Vector2(13, -12), 2.5, colors.decor)
 			if game.pickups.has(tile):
 				draw_pickup(game.center(tile), game.pickups[tile])
-			if game.is_closed(tile):
-				draw_rect(rect.grow(-2.0), Color("a13f5bd9"))
-	var warning_on := int(floor(game.round_elapsed * 2.0)) % 2 == 0
-	if warning_on:
-		for tile in game.warning_tiles():
-			var rect := Rect2(game.ORIGIN + Vector2(tile) * game.CELL, Vector2.ONE * game.CELL)
-			draw_rect(rect.grow(-3.0), Color("f5a65599"), false, 5.0)
 	for bomb in game.bombs:
-		draw_bomb(game.center(bomb.tile), bomb.time)
+		if not bomb.get("danger", false):
+			draw_bomb(game.center(bomb.tile), bomb.time)
 	var flame_owners := {}
 	for flame in game.flames:
 		if not flame_owners.has(flame.tile):
@@ -138,6 +133,18 @@ func _draw() -> void:
 	for i in range(game.players.size()):
 		if game.players[i].alive:
 			draw_duck(game.players[i].pos, i, visual_facing[i], walk_phase[i])
+	if game.wall_mode == "night" and not game.round_over:
+		for y in range(game.HEIGHT):
+			for x in range(game.WIDTH):
+				if not visible_tile(Vector2i(x, y)):
+					draw_rect(Rect2(game.ORIGIN + Vector2(x, y) * game.CELL, Vector2.ONE * game.CELL), Color("111727"))
+	if int(floor(game.round_elapsed * 2.0)) % 2 == 0:
+		for tile in game.warning_tiles():
+			var rect := Rect2(game.ORIGIN + Vector2(tile) * game.CELL, Vector2.ONE * game.CELL)
+			draw_rect(rect.grow(-3.0), Color("f5a65599"), false, 5.0)
+	for bomb in game.bombs:
+		if bomb.get("danger", false):
+			draw_bomb(game.center(bomb.tile), bomb.time)
 	for i in range(game.players.size()):
 		draw_player_card(i)
 	rounded_box(Rect2(142, 667, 259, 29), Color("e7f2ed"), 14.0)
@@ -146,16 +153,19 @@ func _draw() -> void:
 	centered_text("ROOM HOST STARTS NEXT ROUND" if networked else "P2 ARROWS + ENTER  |  M NEXT MAP  R START", Vector2(617, 687), 12, Color("92536b"))
 	if game.round_over:
 		draw_rect(Rect2(game.ORIGIN, Vector2(game.WIDTH * game.CELL, game.HEIGHT * game.CELL)), Color("44395488"))
-		rounded_box(Rect2(273, 229, 414, 242), Color("b4a5b8"), 25.0)
-		rounded_box(Rect2(269, 224, 414, 242), Color("fffaf0"), 25.0)
-		centered_text("ROUND OVER", Vector2(476, 262), 16, Color("aa8a89"))
-		centered_text("IT'S A DRAW!" if game.result == "DRAW" else game.result + "!", Vector2(476, 312), 32, Color("403d57"))
+		var large_result: bool = game.players.size() > 4
+		var panel_y := 187.0 if large_result else 224.0
+		var button_y := 482.0 if large_result else 414.0
+		rounded_box(Rect2(273, panel_y + 5, 414, 356 if large_result else 242), Color("b4a5b8"), 25.0)
+		rounded_box(Rect2(269, panel_y, 414, 356 if large_result else 242), Color("fffaf0"), 25.0)
+		centered_text("ROUND OVER", Vector2(476, panel_y + 38), 16, Color("aa8a89"))
+		centered_text("IT'S A DRAW!" if game.result == "DRAW" else game.result + "!", Vector2(476, panel_y + 88), 32, Color("403d57"))
 		var ranked := game.score_order()
 		for rank in range(ranked.size()):
 			var i: int = ranked[rank]
-			centered_text("%d. PLAYER %d    WINS %d    KILLS %d" % [rank + 1, i + 1, game.scores[i].wins, game.scores[i].kills], Vector2(476, 331 + rank * 23), 13, Color("403d57"))
-		rounded_box(Rect2(352, 414, 248, 36), Color("ffe1a6"), 18.0)
-		centered_text("RETURN TO ROOM" if networked else "PRESS R TO PLAY AGAIN", Vector2(476, 438), 16, Color("73512d"))
+			centered_text("%d. PLAYER %d    WINS %d    KILLS %d" % [rank + 1, i + 1, game.scores[i].wins, game.scores[i].kills], Vector2(476, panel_y + 107 + rank * 23), 13, Color("403d57"))
+		rounded_box(Rect2(352, button_y, 248, 36), Color("ffe1a6"), 18.0)
+		centered_text("RETURN TO ROOM" if networked else "PRESS R TO PLAY AGAIN", Vector2(476, button_y + 24), 16, Color("73512d"))
 
 
 func rounded_box(rect: Rect2, color: Color, radius: float) -> void:
@@ -173,12 +183,31 @@ func centered_text(value: String, baseline: Vector2, size: int, color: Color) ->
 
 func map_colors(mode: String) -> Dictionary:
 	match mode:
+		"night":
+			return {"frame": Color("354460"), "floor": Color("63728b"), "floor_alt": Color("586880"), "wall": Color("3d5072"), "wall_shadow": Color("263752"), "wall_highlight": Color("788da9"), "wall_dot": Color("a8b9cc"), "crate": Color("917d8c"), "crate_shadow": Color("5c5065"), "crate_detail": Color("cbb6bb"), "crate_dot": Color("e2ccd0"), "decor": Color("c1d3ec")}
 		"pond":
 			return {"frame": Color("8cbca9"), "floor": Color("d8f1e6"), "floor_alt": Color("c9e9df"), "wall": Color("60aa91"), "wall_shadow": Color("397e70"), "wall_highlight": Color("a9dfbb"), "wall_dot": Color("398a78"), "crate": Color("e6be81"), "crate_shadow": Color("a77a55"), "crate_detail": Color("fff0bb"), "crate_dot": Color("a87848"), "decor": Color("6ebaa1")}
 		"frost":
 			return {"frame": Color("a5b6d4"), "floor": Color("e7f5fb"), "floor_alt": Color("d6ebf6"), "wall": Color("9dc9e8"), "wall_shadow": Color("648bb9"), "wall_highlight": Color("f3fbff"), "wall_dot": Color("77a9cf"), "crate": Color("b5a8d8"), "crate_shadow": Color("8178ad"), "crate_detail": Color("e8ddfa"), "crate_dot": Color("8f81b7"), "decor": Color("9ccde4")}
 		_:
 			return {"frame": Color("d8d2df"), "floor": Color("e9f7ed"), "floor_alt": Color("f2faef"), "wall": Color("bbc8e1"), "wall_shadow": Color("9ba6c7"), "wall_highlight": Color("e4ecf7"), "wall_dot": Color("a6b7d5"), "crate": Color("e9ad83"), "crate_shadow": Color("b97763"), "crate_detail": Color("fff1d2"), "crate_dot": Color("c67f66"), "decor": Color("d3ebd8")}
+
+
+func visible_tile(tile: Vector2i) -> bool:
+	if game.wall_mode != "night" or game.round_over:
+		return true
+	if networked and (viewer_slot < 0 or not game.players[viewer_slot].alive):
+		return true
+	for i in range(game.players.size()):
+		if networked and i != viewer_slot:
+			continue
+		if not game.players[i].alive:
+			continue
+		var center_tile: Vector2i = game.tile_at(game.players[i].pos)
+		var distance: Vector2i = tile - center_tile
+		if maxi(absi(distance.x), absi(distance.y)) <= game.players[i].vision:
+			return true
+	return false
 
 
 func draw_wall(rect: Rect2, colors: Dictionary) -> void:
@@ -199,6 +228,12 @@ func draw_crate(rect: Rect2, colors: Dictionary) -> void:
 
 func draw_pickup(pos: Vector2, kind: int) -> void:
 	draw_circle(pos + Vector2(0, 3), 17.0, Color("b5cbbd"))
+	if kind == game.PICKUP_VISION:
+		draw_circle(pos, 17.0, Color("a2dbef"))
+		draw_circle(pos, 12.0, Color("e3f8ff"))
+		draw_arc(pos, 8.0, 0.0, TAU, 24, Color("39769b"), 2.5, true)
+		draw_circle(pos, 3.5, Color("39769b"))
+		return
 	draw_circle(pos, 17.0, Color("ffe2a0") if kind == game.PICKUP_BOMB_CAPACITY else Color("d9c6f6"))
 	draw_circle(pos, 12.0, Color("fff5d5") if kind == game.PICKUP_BOMB_CAPACITY else Color("f3e9ff"))
 	if kind == game.PICKUP_BOMB_CAPACITY:
@@ -211,15 +246,15 @@ func draw_pickup(pos: Vector2, kind: int) -> void:
 func draw_flame(pos: Vector2, owners: Array) -> void:
 	var rect := Rect2(pos - Vector2(23, 23), Vector2(46, 46))
 	if owners.size() == 1:
-		var color: Color = COLORS[owners[0]]
+		var color: Color = Color("f5a655") if owners[0] == -1 else COLORS[owners[0]]
 		rounded_box(rect, color.darkened(0.18), 16.0)
 		draw_circle(pos, 18.0, color)
 		draw_circle(pos, 10.0, color.lightened(0.45))
 	else:
 		rounded_box(rect, Color("fff2d6"), 16.0)
-		var offsets := [Vector2(-10, -10), Vector2(10, -10), Vector2(-10, 10), Vector2(10, 10)]
+		var offsets := [Vector2(-11, -10), Vector2(11, -10), Vector2(-11, 10), Vector2(11, 10), Vector2(0, -12), Vector2(0, 12), Vector2.ZERO]
 		for index in range(owners.size()):
-			var color: Color = COLORS[owners[index]]
+			var color: Color = Color("f5a655") if owners[index] == -1 else COLORS[owners[index]]
 			draw_circle(pos + offsets[index], 12.0, color)
 			draw_circle(pos + offsets[index], 5.0, color.lightened(0.45))
 
@@ -253,13 +288,17 @@ func draw_duck(pos: Vector2, player_index: int, angle: float = 0.0, phase: float
 
 func draw_player_card(i: int) -> void:
 	var x := 10.0 if i % 2 == 0 else 830.0
-	var y := 107.0 if i < 2 else 335.0
+	var compact: bool = game.players.size() > 4
+	var y := 82.0 + (i / 2) * 192.0 if compact else (107.0 if i < 2 else 335.0)
+	var card_height := 181.0 if compact else 202.0
 	var tint: Color = COLORS[i].lightened(0.72)
-	rounded_box(Rect2(x, y + 3, 120, 202), Color("e3d8d5"), 17.0)
-	rounded_box(Rect2(x, y, 120, 202), Color("fffdf7"), 17.0)
-	rounded_box(Rect2(x + 8, y + 8, 104, 65), tint, 12.0)
-	draw_duck(Vector2(x + 60, y + 40), i)
-	centered_text("PLAYER %d" % (i + 1), Vector2(x + 60, y + 101), 17, Color("403d57"))
-	centered_text("READY!" if game.players[i].alive else "OUT!", Vector2(x + 60, y + 122), 13, Color("5f9b80") if game.players[i].alive else Color("c77c83"))
-	centered_text("BOMB %d   FIRE %d" % [game.players[i].bomb_limit, game.players[i].range], Vector2(x + 60, y + 153), 12, Color("827b8b"))
-	centered_text("WINS %d   KILLS %d" % [game.scores[i].wins, game.scores[i].kills], Vector2(x + 60, y + 181), 12, Color("827b8b"))
+	rounded_box(Rect2(x, y + 3, 120, card_height), Color("e3d8d5"), 17.0)
+	rounded_box(Rect2(x, y, 120, card_height), Color("fffdf7"), 17.0)
+	rounded_box(Rect2(x + 8, y + 8, 104, 53 if compact else 65), tint, 12.0)
+	draw_duck(Vector2(x + 60, y + (33 if compact else 40)), i)
+	centered_text("PLAYER %d" % (i + 1), Vector2(x + 60, y + (84 if compact else 101)), 17, Color("403d57"))
+	centered_text("READY!" if game.players[i].alive else "OUT!", Vector2(x + 60, y + (105 if compact else 122)), 13, Color("5f9b80") if game.players[i].alive else Color("c77c83"))
+	centered_text("BOMB %d   FIRE %d" % [game.players[i].bomb_limit, game.players[i].range], Vector2(x + 60, y + (130 if compact else 149)), 12, Color("827b8b"))
+	if game.wall_mode == "night":
+		centered_text("SIGHT %d" % game.players[i].vision, Vector2(x + 60, y + (148 if compact else 166)), 12, Color("827b8b"))
+	centered_text("WINS %d   KILLS %d" % [game.scores[i].wins, game.scores[i].kills], Vector2(x + 60, y + (166 if compact else 181)), 12, Color("827b8b"))
