@@ -194,7 +194,7 @@ func _game_changed(snapshot: Dictionary) -> void:
 		game.hazards.append({"kind": hazard.kind, "tiles": tiles, "time": hazard.time})
 	game.flames.clear()
 	for flame in snapshot.flames:
-		game.flames.append({"tile": Vector2i(flame.tile[0], flame.tile[1]), "owner": flame.owner, "time": flame.time})
+		game.flames.append({"tile": Vector2i(flame.tile[0], flame.tile[1]), "owner": flame.owner, "time": flame.time, "kind": flame.get("kind", "")})
 	game.pickups.clear()
 	for pickup in snapshot.pickups:
 		game.pickups[Vector2i(pickup.tile[0], pickup.tile[1])] = pickup.kind

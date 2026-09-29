@@ -24,6 +24,10 @@ const HAZARD_WARNING = 5.0
 const DANGER_START = SUDDEN_DEATH_START + HAZARD_WARNING
 const DANGER_INTERVAL = HAZARD_INTERVAL
 const DANGER_WARNING = HAZARD_WARNING
+const WATER_SPEED_MULTIPLIER = 0.8
+const SPEED_PICKUP_INCREMENT = 0.25
+const SPEED_BONUS_MAX = 0.5
+const KICK_TILES_PER_SECOND = 4.0
 const DIRECTIONS = [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
 const MAP_MODES = ["fixed", "random", "pond", "frost", "night"]
 const MAP_NAMES = {"fixed": "Classic", "random": "Random", "pond": "Lily Pond", "frost": "Frost Garden", "night": "Nightfall"}
@@ -86,7 +90,7 @@ func new_round() -> void:
 				"fixed":
 					pillar = x % 2 == 0 and y % 2 == 0
 				"pond":
-					pillar = (layout_x in [4, 8] and layout_y in [3, 5, 7]) or (layout_x == 6 and layout_y in [2, 5, 8]) or (layout_y == 5 and layout_x in [2, 10])
+					pillar = (layout_x in [4, 8] and layout_y in [3, 5, 7]) or (layout_x == 6 and layout_y in [2, 8]) or (layout_y == 5 and layout_x in [2, 10])
 				"frost":
 					pillar = layout_x in [3, 6, 9] and layout_y in [2, 4, 6, 8]
 			row.append(WALL if edge or pillar else OPEN)
@@ -221,9 +225,35 @@ func overlaps_tile(pos: Vector2, tile: Vector2i) -> bool:
 func step(delta: float, directions: Array, plant_requests: Array) -> void:
 	if round_over:
 		return
-	var previous_elapsed := round_elapsed
-	round_elapsed += delta
-	schedule_hazards(previous_elapsed)
+	var remaining := delta
+	var first_slice := true
+	while remaining > 0.00001 and not round_over:
+		schedule_hazards(round_elapsed)
+		var slice := remaining
+		var next_schedule := next_danger_at - DANGER_WARNING if wall_mode == "fixed" else next_hazard_at
+		if wall_mode == "night":
+			next_schedule = minf(next_schedule, next_night_shuffle_at)
+		if next_schedule > round_elapsed + 0.00001:
+			slice = minf(slice, next_schedule - round_elapsed)
+		for bomb in bombs:
+			if bomb.time > 0.00001:
+				slice = minf(slice, bomb.time)
+		for hazard in hazards:
+			if hazard.time > 0.00001:
+				slice = minf(slice, hazard.time)
+		round_elapsed += slice
+		var requests := plant_requests if first_slice else Array()
+		if not first_slice:
+			requests.resize(players.size())
+			requests.fill(false)
+		step_slice(slice, directions, requests)
+		first_slice = false
+		remaining -= slice
+	if not round_over:
+		schedule_hazards(round_elapsed)
+
+
+func step_slice(delta: float, directions: Array, plant_requests: Array) -> void:
 	for i in range(players.size()):
 		if not players[i].alive:
 			continue
@@ -235,12 +265,12 @@ func step(delta: float, directions: Array, plant_requests: Array) -> void:
 		if flame.time <= 0.0:
 			flames.erase(flame)
 	update_moving_bombs(delta)
-	update_bombs(delta)
 	for hazard in hazards.duplicate():
 		hazard.time -= delta
 		if hazard.time <= 0.0:
 			hazards.erase(hazard)
 			resolve_hazard(hazard)
+	update_bombs(delta)
 	for i in range(players.size()):
 		if not players[i].alive:
 			continue
@@ -262,7 +292,7 @@ func step(delta: float, directions: Array, plant_requests: Array) -> void:
 					elif can_add_range:
 						players[i].range += 1
 				PICKUP_SPEED:
-					players[i].speed_bonus = minf(players[i].speed_bonus + 0.25, 0.5)
+					players[i].speed_bonus = minf(players[i].speed_bonus + SPEED_PICKUP_INCREMENT, SPEED_BONUS_MAX)
 				PICKUP_BOMB_KICK:
 					players[i].can_kick = true
 			pickups.erase(tile)
@@ -372,6 +402,7 @@ func resolve_hazard(hazard: Dictionary) -> void:
 		var triggered: Array = []
 		for tile in hazard.tiles:
 			blast_cell(tile, -1, 0, triggered)
+			flames.back().kind = hazard.kind
 			if board[tile.y][tile.x] == CRATE:
 				board[tile.y][tile.x] = OPEN
 		for bomb in triggered:
@@ -388,6 +419,8 @@ func resolve_hazard(hazard: Dictionary) -> void:
 			for i in range(players.size()):
 				if players[i].alive and overlaps_tile(players[i].pos, tile):
 					players[i].alive = false
+				if move_targets[i] != Vector2.ZERO and tile_at(move_targets[i]) == tile:
+					move_targets[i] = Vector2.ZERO
 	elif hazard.kind == "closing_walls":
 		for tile in hazard.tiles:
 			board[tile.y][tile.x] = WALL
@@ -465,7 +498,6 @@ func try_kick_bomb(tile: Vector2i, direction: Vector2i) -> bool:
 		for other in bombs:
 			if other != bomb and other.tile == next_tile:
 				return false
-		bomb.tile = next_tile
 		bomb.kick_direction = direction
 		bomb.kick_progress = 0.0
 		return true
@@ -483,7 +515,7 @@ func move_player(i: int, delta: float, direction: Vector2) -> void:
 			return
 	var speed: float = SPEED * (1.0 + players[i].speed_bonus)
 	if terrain[tile_at(players[i].pos).y][tile_at(players[i].pos).x] == 1:
-		speed *= 0.8
+		speed *= WATER_SPEED_MULTIPLIER
 	var travel_direction := Vector2i(int(sign(target.x - players[i].pos.x)), int(sign(target.y - players[i].pos.y)))
 	players[i].pos = players[i].pos.move_toward(target, speed * delta)
 	update_safe_bomb(i)
@@ -525,7 +557,7 @@ func update_moving_bombs(delta: float) -> void:
 		var direction: Vector2i = bomb.get("kick_direction", Vector2i.ZERO)
 		if direction == Vector2i.ZERO:
 			continue
-		bomb.kick_progress = bomb.get("kick_progress", 0.0) + minf(delta, maxf(bomb.time, 0.0)) * 4.0
+		bomb.kick_progress = bomb.get("kick_progress", 0.0) + minf(delta, maxf(bomb.time, 0.0)) * KICK_TILES_PER_SECOND
 		while bomb.kick_progress >= 1.0:
 			var next_tile: Vector2i = bomb.tile + direction
 			var blocked: bool = not inside(next_tile) or board[next_tile.y][next_tile.x] != OPEN
@@ -540,6 +572,17 @@ func update_moving_bombs(delta: float) -> void:
 				break
 			bomb.tile = next_tile
 			bomb.kick_progress -= 1.0
+		if bomb.get("kick_direction", Vector2i.ZERO) != Vector2i.ZERO:
+			var next_tile: Vector2i = bomb.tile + direction
+			var blocked: bool = not inside(next_tile) or board[next_tile.y][next_tile.x] != OPEN
+			if not blocked:
+				for other in bombs:
+					if other != bomb and other.tile == next_tile:
+						blocked = true
+						break
+			if blocked:
+				bomb.kick_direction = Vector2i.ZERO
+				bomb.kick_progress = 0.0
 
 
 func update_bombs(delta: float) -> void:

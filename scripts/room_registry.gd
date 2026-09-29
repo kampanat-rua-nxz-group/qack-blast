@@ -189,7 +189,7 @@ func game_view(room: Dictionary) -> Dictionary:
 		bombs.append({"tile": [bomb.tile.x, bomb.tile.y], "owner": bomb.owner, "time": bomb.time, "danger": bomb.get("danger", false), "kick_direction": [kick_direction.x, kick_direction.y], "kick_progress": bomb.get("kick_progress", 0.0)})
 	var flames := []
 	for flame in game.flames:
-		flames.append({"tile": [flame.tile.x, flame.tile.y], "owner": flame.owner, "time": flame.time})
+		flames.append({"tile": [flame.tile.x, flame.tile.y], "owner": flame.owner, "time": flame.time, "kind": flame.get("kind", "")})
 	var pickups := []
 	for tile in game.pickups:
 		pickups.append({"tile": [tile.x, tile.y], "kind": game.pickups[tile]})

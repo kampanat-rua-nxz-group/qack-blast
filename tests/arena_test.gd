@@ -36,6 +36,7 @@ func _initialize() -> void:
 	test_random_burst_chain()
 	test_map_specific_pickup_drops()
 	test_pond_water_speed_and_flood()
+	test_large_step_resolves_flood_before_bomb()
 	test_frost_ice_and_bomb_kick()
 	test_frost_blizzard()
 	test_win_and_kill_persist()
@@ -538,8 +539,10 @@ func test_danger_bomb_waves() -> void:
 	var big_step_game = load("res://scripts/arena_game.gd").new()
 	big_step_game.new_round()
 	big_step_game.round_elapsed = 209.0
+	big_step_game.danger_waves = 2
+	big_step_game.next_danger_at = 215.0
 	big_step_game.step(1.0, idle, no_bombs)
-	check(big_step_game.danger_waves == 3 and big_step_game.next_danger_at == 230.0, "large step catches each due warning once")
+	check(big_step_game.danger_waves == 3 and big_step_game.next_danger_at == 230.0, "step crossing warning boundary schedules the next wave once")
 
 
 func test_danger_bomb_crosses_walls() -> void:
@@ -880,12 +883,69 @@ func test_pond_water_speed_and_flood() -> void:
 	game.step(4.9, [Vector2.ZERO, Vector2.ZERO], [false, false])
 	check(game.board[spawn.y][spawn.x] == 3 and not game.players[0].alive, "flood turns ring into lethal deep water")
 	check(game.solid(spawn, 1), "deep water remains blocked")
+	var approaching = load("res://scripts/arena_game.gd").new()
+	approaching.wall_mode = "pond"
+	approaching.new_round()
+	clear_crates(approaching)
+	approaching.players[0].pos = approaching.center(Vector2i(2, 2))
+	approaching.move_targets[0] = approaching.center(Vector2i(2, 1))
+	approaching.hazards.append({"kind": "flood", "tiles": [Vector2i(2, 1)], "time": 0.01})
+	approaching.step(0.01, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(approaching.players[0].alive and approaching.move_targets[0] == Vector2.ZERO, "flood cancels movement into deep water")
+	approaching.step(0.3, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(approaching.tile_at(approaching.players[0].pos) == Vector2i(2, 2), "duck cannot finish a cached move into deep water")
+	for count in [2, 4]:
+		var connected = load("res://scripts/arena_game.gd").new()
+		connected.wall_mode = "pond"
+		connected.player_count = count
+		connected.new_round()
+		clear_crates(connected)
+		for ring in range(1, mini(connected.WIDTH, connected.HEIGHT) / 2):
+			var flooded: Array[Vector2i] = []
+			for y in range(1, connected.HEIGHT - 1):
+				for x in range(1, connected.WIDTH - 1):
+					if mini(mini(x, connected.WIDTH - 1 - x), mini(y, connected.HEIGHT - 1 - y)) == ring:
+						flooded.append(Vector2i(x, y))
+			connected.resolve_hazard({"kind": "flood", "tiles": flooded})
+			check(dry_tiles_connected(connected), "pond dry cells stay connected after ring %d for %d ducks" % [ring, count])
 	game.player_count = 6
 	game.new_round()
 	check(game.terrain.size() == 13 and game.terrain[0].size() == 15, "large pond board builds terrain")
 	for player in game.players:
 		var tile: Vector2i = game.tile_at(player.pos)
 		check(game.terrain[tile.y][tile.x] == 0, "large pond spawns stay dry")
+
+
+func test_large_step_resolves_flood_before_bomb() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "pond"
+	game.new_round()
+	clear_crates(game)
+	var tile := Vector2i(5, 3)
+	game.bombs.append({"tile": tile, "owner": 0, "range": 1, "time": 10.0})
+	game.hazards.append({"kind": "flood", "tiles": [tile], "time": 5.0})
+	game.step(10.0, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	check(game.bombs.is_empty() and not has_flame(game, tile, 0), "large step removes flooded bomb before its fuse")
+
+
+func dry_tiles_connected(game) -> bool:
+	var dry: Array[Vector2i] = []
+	for y in range(1, game.HEIGHT - 1):
+		for x in range(1, game.WIDTH - 1):
+			if game.board[y][x] == game.OPEN:
+				dry.append(Vector2i(x, y))
+	if dry.is_empty():
+		return true
+	var seen := {dry[0]: true}
+	var queue := [dry[0]]
+	while not queue.is_empty():
+		var tile: Vector2i = queue.pop_front()
+		for direction in game.DIRECTIONS:
+			var neighbor: Vector2i = tile + direction
+			if not seen.has(neighbor) and dry.has(neighbor):
+				seen[neighbor] = true
+				queue.append(neighbor)
+	return seen.size() == dry.size()
 
 
 func test_frost_ice_and_bomb_kick() -> void:
@@ -911,9 +971,12 @@ func test_frost_ice_and_bomb_kick() -> void:
 	check(game.bombs[0].tile == Vector2i(2, 1), "duck without kick cannot move bomb")
 	game.players[0].can_kick = true
 	game.start_move(0, Vector2.RIGHT)
-	check(game.bombs[0].tile == Vector2i(3, 1), "kick starts bomb moving toward wall")
+	check(game.bombs[0].tile == Vector2i(2, 1), "kick starts bomb without an instant extra tile")
+	game.update_moving_bombs(0.24)
+	check(game.bombs[0].tile == Vector2i(2, 1) and game.bombs[0].kick_progress < 1.0, "kick advances after elapsed travel time")
 	game.update_moving_bombs(1.0)
 	check(game.bombs[0].tile == Vector2i(5, 1) and game.bombs[0].owner == 1, "kicked bomb stops at last open tile before wall")
+	check(game.bombs[0].kick_direction == Vector2i.ZERO and game.bombs[0].kick_progress == 0.0, "bomb stops before drawing into blocked cell")
 	game.bombs[0].tile = Vector2i(3, 1)
 	game.bombs[0].time = 0.2
 	game.bombs[0].kick_direction = Vector2i.RIGHT

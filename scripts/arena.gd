@@ -139,15 +139,35 @@ func _draw() -> void:
 			owners.append(flame.owner)
 	for tile in flame_owners:
 		draw_flame(game.center(tile), flame_owners[tile])
+	for flame in game.flames:
+		if flame.get("kind", "") == "blizzard":
+			draw_line(game.center(flame.tile) + Vector2(-17, -17), game.center(flame.tile) + Vector2(17, 17), Color("ddf9ff"), 4.0, true)
+		elif flame.get("kind", "") == "random_burst":
+			draw_arc(game.center(flame.tile), 17.0, 0.0, TAU, 24, Color("c18cff"), 4.0, true)
 	for i in range(game.players.size()):
 		if game.players[i].alive:
 			draw_duck(game.players[i].pos, i, visual_facing[i], walk_phase[i])
 	if game.wall_mode == "night" and not game.round_over:
 		draw_night_vision()
 	if int(floor(game.round_elapsed * 2.0)) % 2 == 0:
-		for tile in game.warning_tiles():
-			var rect := Rect2(game.ORIGIN + Vector2(tile) * game.CELL, Vector2.ONE * game.CELL)
-			draw_rect(rect.grow(-3.0), Color("f5a65599"), false, 5.0)
+		for hazard in game.hazards:
+			var color := Color("bd89f5")
+			match hazard.kind:
+				"flood": color = Color("5bc9e8")
+				"blizzard": color = Color("d8f6ff")
+				"closing_walls": color = Color("a6abbc")
+			for tile in hazard.tiles:
+				var rect := Rect2(game.ORIGIN + Vector2(tile) * game.CELL, Vector2.ONE * game.CELL)
+				draw_rect(rect.grow(-3.0), color, false, 5.0)
+		for bomb in game.bombs:
+			if not bomb.get("danger", false):
+				continue
+			for x in range(game.WIDTH):
+				var row_rect := Rect2(game.ORIGIN + Vector2(x, bomb.tile.y) * game.CELL, Vector2.ONE * game.CELL)
+				draw_rect(row_rect.grow(-3.0), Color("f5a65599"), false, 5.0)
+			for y in range(game.HEIGHT):
+				var column_rect := Rect2(game.ORIGIN + Vector2(bomb.tile.x, y) * game.CELL, Vector2.ONE * game.CELL)
+				draw_rect(column_rect.grow(-3.0), Color("f5a65599"), false, 5.0)
 	for bomb in game.bombs:
 		if bomb.get("danger", false):
 			draw_bomb(game.center(bomb.tile), bomb.time)
