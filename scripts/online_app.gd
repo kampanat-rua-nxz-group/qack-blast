@@ -271,7 +271,11 @@ func _room_changed(room: Dictionary) -> void:
 
 func _game_changed(snapshot: Dictionary) -> void:
 	var game = arena.game
-	game.configure_map(snapshot.players.size())
+	var geometry: Dictionary = snapshot.geometry
+	game.WIDTH = int(geometry.width)
+	game.HEIGHT = int(geometry.height)
+	game.CELL = float(geometry.cell)
+	game.ORIGIN = Vector2(geometry.origin[0], geometry.origin[1])
 	game.board = snapshot.board
 	game.terrain = snapshot.get("terrain", [])
 	game.players.clear()
@@ -310,7 +314,7 @@ func _game_changed(snapshot: Dictionary) -> void:
 	for i in range(game.players.size()):
 		arena.visual_facing[i] = game.players[i].facing
 		arena.walk_phase[i] = 0.0
-	arena.queue_redraw()
+	arena.present_board()
 	if not client.room.is_empty() and client.room.phase == "results":
 		status_label.text = "Round over: %s. The host can start another round." % arena.round_result_text()
 		results.present(client.room, snapshot, client.person_id)

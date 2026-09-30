@@ -18,6 +18,7 @@ func _initialize() -> void:
 	root.add_child(arena)
 	arena.new_round()
 	var game = arena.game
+	test_display_scale_does_not_change_rules(arena)
 	test_spawn_routes(game)
 	test_bomb_exit(game)
 	test_one_press_moves_one_tile(arena)
@@ -1021,3 +1022,76 @@ func has_flame(game, tile: Vector2i, owner: int) -> bool:
 		if flame.tile == tile and flame.owner == owner:
 			return true
 	return false
+
+
+func test_display_scale_does_not_change_rules(arena) -> void:
+	var board = arena.get_node_or_null("Board")
+	check(board != null, "arena has a board renderer independent of HUD")
+	if board == null:
+		return
+	var region := Rect2(142, 82, 676, 572)
+	var baseline := {}
+	for display_cell in [52.0, 26.0]:
+		arena.game.player_count = 2
+		arena.selected_wall_mode = "night"
+		arena.game.rng.seed = 7
+		arena.new_round()
+		clear_crates(arena.game)
+		arena.game.board[1][2] = arena.game.OPEN
+		arena.game.board[1][3] = arena.game.WALL
+		board.present(arena.game, {}, -1)
+		board.fit_to(region, display_cell)
+		check(is_equal_approx(board.scale.x, display_cell / 52.0), "display scale changes the real child transform")
+		check(arena.scale == Vector2.ONE, "HUD remains unscaled")
+		var expected_origin := Vector2(142, 82) if display_cell == 52.0 else Vector2(311, 225)
+		check((board.transform * arena.game.ORIGIN).is_equal_approx(expected_origin), "board is centered inside its reserved region")
+		var start: Vector2 = arena.game.players[0].pos
+		var target: Vector2 = start + Vector2(52, 0)
+		arena.game.start_move(0, Vector2.RIGHT)
+		var ticks := 0
+		while arena.game.players[0].pos != target and ticks < 100:
+			arena.game.step(0.01, [Vector2.ZERO, Vector2.ZERO], [false, false])
+			ticks += 1
+		check(ticks == 28, "one-tile movement takes 0.28 seconds at either display scale")
+		arena.game.start_move(0, Vector2.RIGHT)
+		check(arena.game.move_targets[0] == Vector2.ZERO, "wall blocks movement at either display scale")
+		arena.game.hazards.append({"kind": "closing_walls", "tiles": [Vector2i(4, 4)], "time": 5.0})
+		var warnings: Array = arena.game.warning_tiles()
+		var visible := []
+		for y in range(arena.game.HEIGHT):
+			for x in range(arena.game.WIDTH):
+				if board.visible_tile(Vector2i(x, y)):
+					visible.append(Vector2i(x, y))
+		arena.game.place_bomb(0)
+		arena.game.update_bombs(arena.game.FUSE)
+		var flames := []
+		for flame in arena.game.flames:
+			flames.append(flame.tile)
+		check(flames.has(Vector2i(2, 1)) and not flames.has(Vector2i(3, 1)), "blast uses authoritative adjacent tiles and stops at wall")
+		var observed := {"ticks": ticks, "warnings": warnings, "visible": visible, "flames": flames, "cell": arena.game.CELL, "origin": arena.game.ORIGIN}
+		if baseline.is_empty():
+			baseline = observed
+		else:
+			check(observed == baseline, "renderer fitting preserves timing, collision, blast tiles, warnings, and Nightfall visible tiles")
+	arena.game.player_count = 6
+	arena.selected_wall_mode = "fixed"
+	arena.new_round()
+	board.present(arena.game, {}, -1)
+	board.fit_to(region, 44.0)
+	check(board.transform.is_equal_approx(Transform2D.IDENTITY), "six-player board retains its existing screen layout")
+	var sampled := {"positions": [], "facing": [], "walk_phase": []}
+	for player in arena.game.players:
+		sampled.positions.append(player.pos + Vector2(3, 0))
+		sampled.facing.append(1.0)
+		sampled.walk_phase.append(2.0)
+	var authoritative_pos: Vector2 = arena.game.players[0].pos
+	board.present(arena.game, sampled, -1)
+	check(board.player_position(0) == authoritative_pos + Vector2(3, 0), "board can present sampled positions")
+	check(board.player_facing(0) == 1.0 and board.player_walk_phase(0) == 2.0, "board can present sampled facing and walk phase")
+	check(arena.game.players[0].pos == authoritative_pos, "sampled presentation does not mutate rules")
+	arena.game.player_count = 2
+	arena.new_round()
+	arena.visual_facing[0] = 0.7
+	arena.walk_phase[0] = 1.2
+	arena.present_board()
+	check(board.player_position(0) == arena.game.players[0].pos and board.player_facing(0) == 0.7 and board.player_walk_phase(0) == 1.2, "empty display state preserves existing authoritative animation")
