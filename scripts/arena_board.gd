@@ -5,6 +5,7 @@ const COLORS = [Color("65cfc6"), Color("f58fb1"), Color("f4c66c"), Color("a995e8
 var game
 var display_state: Dictionary = {}
 var viewer_slot := -1
+var spawn_marker_slot := -1
 var networked := false
 var visual_facing: Array = []
 var walk_phase: Array = []
@@ -84,6 +85,11 @@ func _draw() -> void:
 	for i in range(game.players.size()):
 		if game.players[i].alive:
 			draw_duck(player_position(i), i, player_facing(i), player_walk_phase(i))
+	# Draw local-only spawn identification beneath the existing Nightfall mask.
+	if spawn_marker_slot >= 0 and spawn_marker_slot < game.players.size():
+		var at := player_position(spawn_marker_slot)
+		draw_arc(at, 22.0, 0.0, TAU, 32, Color("fffdf7"), 2.0, true)
+		centered_text("YOU", at + Vector2(0, -25), 12, Color("fffdf7"))
 	if game.wall_mode == "night" and not game.round_over:
 		draw_night_vision()
 	if int(floor(game.round_elapsed * 2.0)) % 2 == 0:
