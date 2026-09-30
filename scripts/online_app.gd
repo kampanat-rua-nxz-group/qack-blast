@@ -3,6 +3,7 @@ extends Control
 const ConnectionFlow = preload("res://scripts/connection_flow.gd")
 const PlayerInput = preload("res://scripts/player_input.gd")
 const RoomClient = preload("res://scripts/room_client.gd")
+const ArenaPresentation = preload("res://scripts/arena_presentation.gd")
 const ArenaGame = preload("res://scripts/arena_game.gd")
 const ArenaScene = preload("res://scenes/arena.tscn")
 const LobbyArt = preload("res://scripts/lobby_art.gd")
@@ -36,6 +37,7 @@ var can_rejoin := false
 var player_input = PlayerInput.new()
 var input_focused := true
 var input_clock := 0.0
+var presentation = ArenaPresentation.new()
 
 
 func _ready() -> void:
@@ -169,6 +171,8 @@ func request(message: Dictionary) -> void:
 
 func _process(delta: float) -> void:
 	_connection_actions(connection_flow.advance(delta))
+	if arena.visible:
+		arena.present_board(presentation.sample(Time.get_ticks_usec() / 1000000.0))
 
 
 func _transport_result(generation: int, connected: bool) -> void:
@@ -270,6 +274,9 @@ func _room_changed(room: Dictionary) -> void:
 
 
 func _game_changed(snapshot: Dictionary) -> void:
+	if not presentation.accepts_snapshot(snapshot):
+		return
+	presentation.push_snapshot(snapshot, Time.get_ticks_usec() / 1000000.0)
 	var game = arena.game
 	var geometry: Dictionary = snapshot.geometry
 	game.WIDTH = int(geometry.width)
@@ -279,8 +286,10 @@ func _game_changed(snapshot: Dictionary) -> void:
 	game.board = snapshot.board
 	game.terrain = snapshot.get("terrain", [])
 	game.players.clear()
+	game.move_targets.clear()
 	for player in snapshot.players:
 		game.players.append({"pos": Vector2(player.pos[0], player.pos[1]), "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.get("speed_bonus", 0.0), "can_kick": player.get("can_kick", false), "facing": player.facing})
+		game.move_targets.append(Vector2(player.move_target[0], player.move_target[1]))
 	game.player_count = game.players.size()
 	game.bombs.clear()
 	for bomb in snapshot.bombs:
@@ -309,12 +318,7 @@ func _game_changed(snapshot: Dictionary) -> void:
 			if person.id == client.person_id:
 				arena.viewer_slot = person.slot
 				break
-	arena.visual_facing.resize(game.players.size())
-	arena.walk_phase.resize(game.players.size())
-	for i in range(game.players.size()):
-		arena.visual_facing[i] = game.players[i].facing
-		arena.walk_phase[i] = 0.0
-	arena.present_board()
+	arena.present_board(presentation.sample(Time.get_ticks_usec() / 1000000.0))
 	if not client.room.is_empty() and client.room.phase == "results":
 		status_label.text = "Round over: %s. The host can start another round." % arena.round_result_text()
 		results.present(client.room, snapshot, client.person_id)
@@ -388,6 +392,8 @@ func _show_error(message: String) -> void:
 
 
 func _left_room() -> void:
+	presentation.reset()
+	arena.present_board()
 	connection_flow.cancel()
 	_connection_actions(connection_flow.advance(0.0))
 	can_rejoin = false

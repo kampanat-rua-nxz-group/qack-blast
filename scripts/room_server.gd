@@ -26,8 +26,8 @@ func poll(delta: float) -> void:
 	snapshot_clock += delta
 	if snapshot_clock >= 0.05:
 		snapshot_clock = 0.0
-		for peer_id in registry.peer_rooms:
-			push_state(peer_id)
+		for room in registry.rooms.values():
+			push_room_state(room)
 
 
 func handle(peer_id: int, message: Dictionary) -> void:
@@ -62,9 +62,7 @@ func handle(peer_id: int, message: Dictionary) -> void:
 		send_to(peer_id, {"type": "joined", "code": result.code, "person_id": result.person_id, "name": result.name})
 	if kind != "input":
 		var room := registry.room_for_peer(peer_id)
-		for person in room.people:
-			if person.peer != 0:
-				push_state(person.peer)
+		push_room_state(room)
 
 
 func valid_direction_array(raw: Variant) -> bool:
@@ -78,6 +76,17 @@ func push_state(peer_id: int) -> void:
 	send_to(peer_id, registry.room_view(room))
 	if room.game != null:
 		send_to(peer_id, registry.game_view(room))
+
+
+func push_room_state(room: Dictionary) -> void:
+	# Materialize once so every recipient sees the same sequence and authority.
+	var room_snapshot: Dictionary = registry.room_view(room)
+	var game_snapshot: Dictionary = registry.game_view(room) if room.game != null else {}
+	for person in room.people:
+		if person.peer != 0:
+			send_to(person.peer, room_snapshot)
+			if not game_snapshot.is_empty():
+				send_to(person.peer, game_snapshot)
 
 
 func send_to(peer_id: int, message: Dictionary) -> void:

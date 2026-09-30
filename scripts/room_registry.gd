@@ -15,7 +15,7 @@ func create_room(peer_id: int, nickname: String) -> Dictionary:
 	if peer_rooms.has(peer_id):
 		return {"ok": false, "error": "Already in a room"}
 	var code := make_code()
-	rooms[code] = {"code": code, "host": 0, "people": [], "phase": "lobby", "wall_mode": "fixed", "game": null, "lineup": [], "directions": [], "plants": [], "move_presses": [], "input_remaining": []}
+	rooms[code] = {"code": code, "host": 0, "people": [], "phase": "lobby", "round_id": 0, "snapshot_seq": 0, "wall_mode": "fixed", "game": null, "lineup": [], "directions": [], "plants": [], "move_presses": [], "input_remaining": []}
 	return join_room(peer_id, code, nickname)
 
 
@@ -117,6 +117,7 @@ func start_round(peer_id: int) -> bool:
 		room.move_presses.append(Vector2.ZERO)
 		room.input_remaining.append(0.0)
 		game.scores.append(person.scores)
+	room.round_id += 1
 	game.new_round()
 	room.game = game
 	room.phase = "playing"
@@ -185,14 +186,17 @@ func room_view(room: Dictionary) -> Dictionary:
 	var people := []
 	for person in room.people:
 		people.append({"id": person.id, "name": person.name, "connected": person.peer != 0, "slot": person.slot, "wins": person.scores.wins, "kills": person.scores.kills})
-	return {"type": "room", "code": room.code, "host": room.host, "phase": room.phase, "wall_mode": room.wall_mode, "people": people}
+	return {"type": "room", "code": room.code, "host": room.host, "phase": room.phase, "round_id": room.round_id, "wall_mode": room.wall_mode, "people": people}
 
 
 func game_view(room: Dictionary) -> Dictionary:
+	room.snapshot_seq += 1
 	var game = room.game
 	var players := []
-	for player in game.players:
-		players.append({"pos": [player.pos.x, player.pos.y], "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.speed_bonus, "can_kick": player.can_kick, "facing": player.facing})
+	for i in range(game.players.size()):
+		var player: Dictionary = game.players[i]
+		var target: Vector2 = game.move_targets[i]
+		players.append({"pos": [player.pos.x, player.pos.y], "move_target": [target.x, target.y], "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.speed_bonus, "can_kick": player.can_kick, "facing": player.facing})
 	var bombs := []
 	for bomb in game.bombs:
 		var kick_direction: Vector2i = bomb.get("kick_direction", Vector2i.ZERO)
@@ -209,7 +213,7 @@ func game_view(room: Dictionary) -> Dictionary:
 		for tile in hazard.tiles:
 			tiles.append([tile.x, tile.y])
 		hazards.append({"kind": hazard.kind, "tiles": tiles, "time": hazard.time})
-	return {"type": "game", "geometry": {"width": game.WIDTH, "height": game.HEIGHT, "cell": game.CELL, "origin": [game.ORIGIN.x, game.ORIGIN.y]}, "board": game.board, "terrain": game.terrain, "players": players, "bombs": bombs, "hazards": hazards, "flames": flames, "pickups": pickups, "scores": game.scores, "round_elapsed": game.round_elapsed, "round_over": game.round_over, "result": game.result, "wall_mode": game.wall_mode}
+	return {"type": "game", "round_id": room.round_id, "snapshot_seq": room.snapshot_seq, "geometry": {"width": game.WIDTH, "height": game.HEIGHT, "cell": game.CELL, "origin": [game.ORIGIN.x, game.ORIGIN.y]}, "board": game.board, "terrain": game.terrain, "players": players, "bombs": bombs, "hazards": hazards, "flames": flames, "pickups": pickups, "scores": game.scores, "round_elapsed": game.round_elapsed, "round_over": game.round_over, "result": game.result, "wall_mode": game.wall_mode}
 
 
 func make_code() -> String:
