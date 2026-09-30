@@ -1,5 +1,7 @@
 extends Node
 
+signal transport_result(attempt_id: int, connected: bool)
+signal room_result(attempt_id: int, message: Dictionary)
 signal transport_connected
 signal room_changed(room: Dictionary)
 signal game_changed(game: Dictionary)
@@ -10,6 +12,7 @@ signal transport_disconnected
 var socket := WebSocketMultiplayerPeer.new()
 var connected := false
 var connecting := false
+var transport_generation := -1
 var server_url := ""
 var person_id := 0
 var room: Dictionary = {}
@@ -29,26 +32,43 @@ static func resolve_server_url(args: PackedStringArray, web_value: String, publi
 	return DEFAULT_SERVER_URL
 
 
-func connect_to_server(url: String) -> void:
-	if connected:
-		transport_connected.emit()
-		return
+func connect_to_server(url: String, generation: int = 0) -> void:
+	close_transport(transport_generation)
 	server_url = url
+	transport_generation = generation
 	connecting = true
-	socket.close()
 	socket = WebSocketMultiplayerPeer.new()
 	var error := socket.create_client(url)
 	if error != OK:
 		connecting = false
-		error_received.emit("Cannot reach %s. Start the Godot room server and try again." % server_url)
+		transport_result.emit(generation, false)
+
+
+func close_transport(generation: int) -> void:
+	if generation != transport_generation:
+		return
+	socket.close()
+	transport_generation = -1
+	connected = false
+	connecting = false
+	person_id = 0
+	room = {}
+	game = {}
 
 
 func _process(_delta: float) -> void:
-	socket.poll()
-	var status := socket.get_connection_status()
+	if transport_generation < 0:
+		return
+	var polled_socket := socket
+	var generation := transport_generation
+	polled_socket.poll()
+	var status := polled_socket.get_connection_status()
 	if status == MultiplayerPeer.CONNECTION_CONNECTED and not connected:
 		connecting = false
 		connected = true
+		transport_result.emit(generation, true)
+		if generation != transport_generation or socket != polled_socket:
+			return
 		transport_connected.emit()
 	elif status == MultiplayerPeer.CONNECTION_DISCONNECTED and connected:
 		connected = false
@@ -56,16 +76,23 @@ func _process(_delta: float) -> void:
 		room = {}
 		game = {}
 		transport_disconnected.emit()
+		transport_result.emit(generation, false)
 	elif status == MultiplayerPeer.CONNECTION_DISCONNECTED and connecting:
 		connecting = false
-		error_received.emit("Cannot reach %s. Start the Godot room server and try again." % server_url)
-	while socket.get_available_packet_count() > 0:
-		var message = JSON.parse_string(socket.get_packet().get_string_from_utf8())
+		transport_result.emit(generation, false)
+	while generation == transport_generation and socket == polled_socket and polled_socket.get_available_packet_count() > 0:
+		var message = JSON.parse_string(polled_socket.get_packet().get_string_from_utf8())
 		if message is Dictionary:
-			accept(message)
+			accept(message, generation)
 
 
-func accept(message: Dictionary) -> void:
+func accept(message: Dictionary, generation: int = -1) -> void:
+	if generation >= 0 and generation != transport_generation:
+		return
+	if str(message.get("type", "")) in ["joined", "error"]:
+		room_result.emit(transport_generation if generation < 0 else generation, message)
+		if generation >= 0 and generation != transport_generation:
+			return
 	match str(message.get("type", "")):
 		"joined":
 			person_id = int(message.person_id)

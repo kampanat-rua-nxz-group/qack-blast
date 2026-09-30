@@ -1,6 +1,7 @@
 extends SceneTree
 
 const RoomClient = preload("res://scripts/room_client.gd")
+const Ui = preload("res://scripts/lobby_ui.gd")
 const RoomRegistry = preload("res://scripts/room_registry.gd")
 
 var failures := 0
@@ -24,6 +25,7 @@ func run_checks(app) -> void:
 	check(RoomClient.resolve_server_url(PackedStringArray(["--server=wss://duck.example"]), "") == "wss://duck.example", "server URL reads --server argument")
 	check(RoomClient.resolve_server_url(PackedStringArray(["--server=ws://a"]), " wss://b ") == "wss://b", "web server parameter wins")
 	check(app.lobby.find_children("*", "LineEdit", true, false).size() == 2, "entry screen hides server URL")
+	test_connection_ui(app)
 	var registry = RoomRegistry.new()
 	var result: Dictionary = registry.create_room(10, "Duck")
 	app.client.accept({"type": "joined", "person_id": result.person_id})
@@ -98,7 +100,48 @@ func run_checks(app) -> void:
 	check(app.arena.player_label(5) == "Duck#5", "rematch cards follow the new six-player lineup")
 	app.client.accept({"type": "left"})
 	check(app.lobby.visible and not app.arena.visible and not app.results.visible and app.entry_card.visible, "leaving returns to room entry")
+	test_rejoin_preserves_code_without_resuming_identity(app)
 	finish()
+
+
+func test_connection_ui(app) -> void:
+	app.server_url = "wss://game.example"
+	app.request({"type": "create", "name": "Duck"})
+	var create = app.get("create_button")
+	check(create != null and create.disabled, "busy connection disables duplicate create")
+	if create == null:
+		return
+	check(app.join_button.disabled and app.cancel_button.visible, "busy connection offers cancel and disables join")
+	app._connection_actions(app.connection_flow.advance(8.0))
+	check(app.status_label.text == "The server may be waking up. This can take about a minute.", "eight-second waking status reaches player UI")
+	check(not app.status_label.text.contains("game.example"), "player status hides endpoint")
+	app.request({"type": "join", "name": "Duplicate", "code": "ABCDEF"})
+	check(app.connection_flow.retry_request.type == "create", "busy UI action cannot replace pending request")
+	app._cancel_connection()
+	check(not create.disabled and app.pending_request.is_empty(), "cancel restores entry and discards command")
+	for public_url in ["wss://game.example", "wss://localhost.example", "wss://127.0.0.1.example", "wss://[::1].example"]:
+		check(not Ui.is_loopback_server(public_url), "public lookalike does not receive development hints")
+		check(not Ui.connection_text("failed", "connection", false, Ui.is_loopback_server(public_url)).contains("Godot"), "public failure gives player recovery without local hint")
+	for local_url in ["ws://127.0.0.1:9080", "ws://localhost:9080", "ws://[::1]:9080"]:
+		check(Ui.is_loopback_server(local_url), "actual loopback permits local hint")
+	app.server_url = RoomClient.DEFAULT_SERVER_URL
+
+
+func test_rejoin_preserves_code_without_resuming_identity(app) -> void:
+	app.name_field.text = "Remembered Duck"
+	app.code_field.text = "ABCDEF"
+	app.client.person_id = 55
+	app._disconnected()
+	check(app.code_field.text == "ABCDEF" and app.name_field.text == "Remembered Duck", "disconnect preserves room code and nickname")
+	var rejoin = app.get("rejoin_button")
+	check(rejoin != null and rejoin.visible, "disconnect offers explicit rejoin")
+	if rejoin == null:
+		return
+	check(app.client.person_id == 0 and app.client.room.is_empty(), "disconnect clears previous identity")
+	check(app.status_label.text.contains("new player") and app.status_label.text.contains("next round"), "rejoin explains new participant and next round")
+	app._rejoin_room()
+	check(app.connection_flow.retry_request == {"type": "join", "name": "Remembered Duck", "code": "ABCDEF"}, "rejoin sends preserved code without identity credentials")
+	app._cancel_connection()
 
 
 func check(condition: bool, message: String) -> void:
