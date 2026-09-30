@@ -8,6 +8,7 @@ const WALK_RADIANS_PER_PIXEL = 18.0 / 188.0
 var samples: Array[Dictionary] = []
 var round_id := -1
 var snapshot_seq := -1
+var display_elapsed := -INF
 var last_positions: Array = []
 var facing: Array = []
 var walk_phase: Array = []
@@ -17,6 +18,7 @@ func reset() -> void:
 	samples.clear()
 	round_id = -1
 	snapshot_seq = -1
+	display_elapsed = -INF
 	last_positions.clear()
 	facing.clear()
 	walk_phase.clear()
@@ -52,7 +54,11 @@ func sample(now: float) -> Dictionary:
 	if samples.is_empty():
 		return {}
 	var latest: Dictionary = samples.back().snapshot
-	var time := minf(float(latest.round_elapsed), float(latest.round_elapsed) + now - float(samples.back().received_at) - BUFFER_SECONDS)
+	var buffered_time := float(latest.round_elapsed) + now - float(samples.back().received_at) - BUFFER_SECONDS
+	# Immediate command broadcasts may reanchor the buffered clock backward.
+	# Hold the cursor until it catches up, within this history epoch only.
+	display_elapsed = clampf(maxf(display_elapsed, buffered_time), float(samples.front().snapshot.round_elapsed), float(latest.round_elapsed))
+	var time := display_elapsed
 	var left: Dictionary = samples.front().snapshot
 	var right := left
 	for entry in samples:
