@@ -25,6 +25,7 @@ func run_checks(app) -> void:
 	check(RoomClient.resolve_server_url(PackedStringArray(["--server=wss://duck.example"]), "") == "wss://duck.example", "server URL reads --server argument")
 	check(RoomClient.resolve_server_url(PackedStringArray(["--server=ws://a"]), " wss://b ") == "wss://b", "web server parameter wins")
 	check(app.lobby.find_children("*", "LineEdit", true, false).size() == 2, "entry screen hides server URL")
+	test_snapshot_geometry_round_trip(app)
 	test_connection_ui(app)
 	var registry = RoomRegistry.new()
 	var result: Dictionary = registry.create_room(10, "Duck")
@@ -153,3 +154,33 @@ func check(condition: bool, message: String) -> void:
 func finish() -> void:
 	print("Online UI checks: %d failure(s)" % failures)
 	quit(1 if failures else 0)
+
+
+func test_snapshot_geometry_round_trip(app) -> void:
+	var registry = RoomRegistry.new()
+	var result: Dictionary = registry.create_room(1, "One")
+	registry.join_room(2, result.code, "Two")
+	registry.start_round(1)
+	var room: Dictionary = registry.rooms[result.code]
+	# Deliberately differs from the profile inferred from these two players.
+	room.game.player_count = 6
+	room.game.new_round()
+	room.game.players.resize(2)
+	room.game.ORIGIN = Vector2(18, 26)
+	room.game.players[0].pos = Vector2(84, 92)
+	room.game.players[1].pos = Vector2(612, 532)
+	var snapshot: Dictionary = JSON.parse_string(JSON.stringify(registry.game_view(room)))
+	check(snapshot.has("geometry"), "snapshot includes authoritative geometry")
+	if not snapshot.has("geometry"):
+		return
+	check(snapshot.geometry.width == 15 and snapshot.geometry.height == 13 and snapshot.geometry.cell == 44.0 and snapshot.geometry.origin == [18.0, 26.0], "geometry survives a JSON round trip")
+	app.client.accept(snapshot)
+	check(app.arena.game.WIDTH == 15 and app.arena.game.HEIGHT == 13 and app.arena.game.CELL == 44.0 and app.arena.game.ORIGIN == Vector2(18, 26), "client applies geometry rather than guessing from player count")
+	check(app.arena.game.tile_at(app.arena.game.players[0].pos) == Vector2i(1, 1), "snapshot origin and cell restore rule-space coordinates")
+	var board = app.arena.get_node_or_null("Board")
+	check(board != null, "online arena uses shared board renderer")
+	if board != null:
+		check((board.transform * app.arena.game.ORIGIN).is_equal_approx(Vector2(150, 82)), "snapshot board is centered in display region")
+		check((board.transform * app.arena.game.players[0].pos).is_equal_approx(Vector2(216, 148)), "snapshot duck uses same world-to-display transform as board")
+		board.fit_to(Rect2(142, 82, 676, 572), 22.0)
+		check(app.arena.game.tile_at(app.arena.game.players[0].pos) == Vector2i(1, 1), "online display scaling preserves snapshot rule coordinates")
