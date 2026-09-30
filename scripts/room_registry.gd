@@ -15,7 +15,7 @@ func create_room(peer_id: int, nickname: String) -> Dictionary:
 	if peer_rooms.has(peer_id):
 		return {"ok": false, "error": "Already in a room"}
 	var code := make_code()
-	rooms[code] = {"code": code, "host": 0, "people": [], "phase": "lobby", "round_id": 0, "snapshot_seq": 0, "wall_mode": "fixed", "game": null, "lineup": [], "directions": [], "plants": [], "move_presses": [], "input_remaining": []}
+	rooms[code] = {"code": code, "host": 0, "people": [], "phase": "lobby", "countdown_remaining": 0.0, "notice": "", "round_id": 0, "snapshot_seq": 0, "wall_mode": "fixed", "game": null, "lineup": [], "directions": [], "plants": [], "move_presses": [], "input_remaining": []}
 	return join_room(peer_id, code, nickname)
 
 
@@ -60,6 +60,8 @@ func leave(peer_id: int) -> void:
 	var room: Dictionary = rooms[code]
 	var leaving: Dictionary = person_for_peer(room, peer_id)
 	leaving.peer = 0
+	if room.phase == "countdown" and leaving.id in room.lineup:
+		cancel_countdown(room)
 	if room.phase == "playing" and leaving.slot >= 0 and room.game.players[leaving.slot].alive:
 		leaving.disconnect_remaining = DISCONNECT_GRACE
 		room.directions[leaving.slot] = Vector2.ZERO
@@ -78,7 +80,7 @@ func leave(peer_id: int) -> void:
 
 func choose_map(peer_id: int, mode: String) -> bool:
 	var room := room_for_peer(peer_id)
-	if room.is_empty() or room.phase == "playing" or not mode in ArenaGame.MAP_MODES:
+	if room.is_empty() or room.phase in ["countdown", "playing"] or not mode in ArenaGame.MAP_MODES:
 		return false
 	if person_for_peer(room, peer_id).id != room.host:
 		return false
@@ -88,7 +90,7 @@ func choose_map(peer_id: int, mode: String) -> bool:
 
 func start_round(peer_id: int) -> bool:
 	var room := room_for_peer(peer_id)
-	if room.is_empty() or room.phase == "playing" or person_for_peer(room, peer_id).id != room.host:
+	if room.is_empty() or room.phase in ["countdown", "playing"] or person_for_peer(room, peer_id).id != room.host:
 		return false
 	var connected: Array = []
 	for person in room.people:
@@ -120,7 +122,9 @@ func start_round(peer_id: int) -> bool:
 	room.round_id += 1
 	game.new_round()
 	room.game = game
-	room.phase = "playing"
+	room.phase = "countdown"
+	room.countdown_remaining = 3.0
+	room.notice = ""
 	return true
 
 
@@ -145,21 +149,45 @@ func set_input(peer_id: int, direction: Vector2, plant: bool, move_press: Vector
 	return true
 
 
+func cancel_countdown(room: Dictionary) -> void:
+	room.phase = "lobby"
+	room.countdown_remaining = 0.0
+	room.notice = "Countdown cancelled: a player left. Waiting for the host to start again."
+	room.game = null
+	room.lineup.clear()
+	room.directions.clear()
+	room.plants.clear()
+	room.move_presses.clear()
+	room.input_remaining.clear()
+	for person in room.people:
+		person.slot = -1
+		person.disconnect_remaining = 0.0
+
+
 func tick(delta: float) -> void:
 	for room in rooms.values():
+		var play_delta := delta
+		if room.phase == "countdown":
+			play_delta = maxf(0.0, delta - room.countdown_remaining)
+			room.countdown_remaining = maxf(0.0, room.countdown_remaining - delta)
+			if room.countdown_remaining > 0.0:
+				continue
+			room.phase = "playing"
+			room.plants.fill(false)
+			room.move_presses.fill(Vector2.ZERO)
 		if room.phase != "playing":
 			continue
 		for i in range(room.input_remaining.size()):
-			room.input_remaining[i] -= delta
+			room.input_remaining[i] -= play_delta
 			if room.input_remaining[i] <= 0.0:
 				room.directions[i] = Vector2.ZERO
 				room.move_presses[i] = Vector2.ZERO
 		for person in room.people:
 			if person.peer == 0 and person.slot >= 0 and person.disconnect_remaining > 0.0:
-				person.disconnect_remaining -= delta
+				person.disconnect_remaining -= play_delta
 				if person.disconnect_remaining <= 0.0:
 					room.game.players[person.slot].alive = false
-		room.game.step(delta, room.directions, room.plants, room.move_presses)
+		room.game.step(play_delta, room.directions, room.plants, room.move_presses)
 		room.move_presses.fill(Vector2.ZERO)
 		for i in range(room.plants.size()):
 			room.plants[i] = false
@@ -186,7 +214,7 @@ func room_view(room: Dictionary) -> Dictionary:
 	var people := []
 	for person in room.people:
 		people.append({"id": person.id, "name": person.name, "connected": person.peer != 0, "slot": person.slot, "wins": person.scores.wins, "kills": person.scores.kills})
-	return {"type": "room", "code": room.code, "host": room.host, "phase": room.phase, "round_id": room.round_id, "wall_mode": room.wall_mode, "people": people}
+	return {"type": "room", "code": room.code, "host": room.host, "phase": room.phase, "countdown_remaining": room.countdown_remaining, "notice": room.notice, "round_id": room.round_id, "wall_mode": room.wall_mode, "people": people}
 
 
 func game_view(room: Dictionary) -> Dictionary:

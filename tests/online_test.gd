@@ -25,6 +25,7 @@ func run_checks(app) -> void:
 	check(RoomClient.resolve_server_url(PackedStringArray(["--server=wss://duck.example"]), "") == "wss://duck.example", "server URL reads --server argument")
 	check(RoomClient.resolve_server_url(PackedStringArray(["--server=ws://a"]), " wss://b ") == "wss://b", "web server parameter wins")
 	check(app.lobby.find_children("*", "LineEdit", true, false).size() == 2, "entry screen hides server URL")
+	test_game_arrives_before_room(app)
 	test_snapshot_geometry_round_trip(app)
 	test_authoritative_display_separation(app)
 	test_connection_ui(app)
@@ -44,6 +45,8 @@ func run_checks(app) -> void:
 	check(app.roster_label.text.contains("Duck") and not app.roster_label.text.contains("Wins") and not app.roster_label.text.contains("Kills"), "waiting roster omits scores")
 	check(registry.choose_map(10, "night"), "host can select night map")
 	registry.start_round(10)
+	check(registry.room_for_peer(10).phase == "countdown", "start enters authoritative countdown")
+	registry.tick(3.0)
 	var room: Dictionary = registry.rooms[result.code]
 	app.client.accept(registry.room_view(room))
 	app.client.accept(registry.game_view(room))
@@ -94,6 +97,22 @@ func run_checks(app) -> void:
 	for peer_id in [30, 40, 50, 60]:
 		check(registry.join_room(peer_id, result.code, "Duck").ok, "another player joins before six-player rematch")
 	check(registry.start_round(10), "host starts six-player rematch")
+	check(room.phase == "countdown", "replay enters countdown")
+	app.client.accept(registry.room_view(room))
+	check(not app.arena.visible and app.lobby.visible and not app.results.visible, "new round prepares without showing previous round arena")
+	check(app.status_label.text.contains("Preparing"), "mismatched room and game show preparing state")
+	app.client.accept(registry.game_view(room))
+	check(app.arena.visible and app.arena.get("countdown_text") == "3", "matching prepared game shows authoritative countdown overlay")
+	check(app.map_button.disabled and app.start_button.disabled, "countdown locks host map and start controls")
+	registry.tick(1.0)
+	app.client.accept(registry.room_view(room))
+	check(app.arena.get("countdown_text") == "2", "shared countdown advances from room state")
+	registry.tick(1.0)
+	app.client.accept(registry.room_view(room))
+	check(app.arena.get("countdown_text") == "1", "shared countdown displays final second")
+	registry.tick(1.0)
+	app.client.accept(registry.room_view(room))
+	check(app.arena.get("countdown_text") == "GO", "authoritative playing transition displays GO")
 	app.client.accept(registry.room_view(room))
 	app.client.accept(registry.game_view(room))
 	check(app.arena.visible and not app.lobby.visible and not app.results.visible, "rematch goes directly to arena")
@@ -162,6 +181,8 @@ func test_snapshot_geometry_round_trip(app) -> void:
 	var result: Dictionary = registry.create_room(1, "One")
 	registry.join_room(2, result.code, "Two")
 	registry.start_round(1)
+	check(registry.room_for_peer(1).phase == "countdown", "start enters authoritative countdown")
+	registry.tick(3.0)
 	var room: Dictionary = registry.rooms[result.code]
 	# Deliberately differs from the profile inferred from these two players.
 	room.game.player_count = 6
@@ -175,6 +196,7 @@ func test_snapshot_geometry_round_trip(app) -> void:
 	if not snapshot.has("geometry"):
 		return
 	check(snapshot.geometry.width == 15 and snapshot.geometry.height == 13 and snapshot.geometry.cell == 44.0 and snapshot.geometry.origin == [18.0, 26.0], "geometry survives a JSON round trip")
+	app.client.accept(registry.room_view(room))
 	app.client.accept(snapshot)
 	check(app.arena.game.WIDTH == 15 and app.arena.game.HEIGHT == 13 and app.arena.game.CELL == 44.0 and app.arena.game.ORIGIN == Vector2(18, 26), "client applies geometry rather than guessing from player count")
 	check(app.arena.game.tile_at(app.arena.game.players[0].pos) == Vector2i(1, 1), "snapshot origin and cell restore rule-space coordinates")
@@ -197,6 +219,8 @@ func test_authoritative_display_separation(app) -> void:
 	registry.join_room(2, created.code, "B")
 	registry.choose_map(1, "night")
 	registry.start_round(1)
+	check(registry.room_for_peer(1).phase == "countdown", "start enters authoritative countdown")
+	registry.tick(3.0)
 	var room: Dictionary = registry.rooms[created.code]
 	room.game.board[1][2] = 0
 	app.client.accept({"type": "joined", "person_id": created.person_id})
@@ -226,3 +250,25 @@ func test_authoritative_display_separation(app) -> void:
 	app.presentation.push_snapshot(a, 10.0)
 	app._disconnected()
 	check(app.presentation.sample(10.1).is_empty(), "disconnect clears presentation history")
+
+
+func test_game_arrives_before_room(app) -> void:
+	var registry = RoomRegistry.new()
+	var created: Dictionary = registry.create_room(1, "One")
+	registry.join_room(2, created.code, "Two")
+	registry.start_round(1)
+	var room: Dictionary = registry.room_for_peer(1)
+	app.client.accept(registry.room_view(room))
+	app.client.accept(registry.game_view(room))
+	registry.tick(3.0)
+	room.game.players[0].alive = false
+	room.game.resolve_round()
+	registry.tick(0.0)
+	app.client.accept(registry.room_view(room))
+	registry.choose_map(1, "pond")
+	registry.start_round(1)
+	app.client.accept(registry.game_view(room))
+	check(not app.arena.visible, "future game snapshot stays hidden until matching room authority")
+	app.client.accept(registry.room_view(room))
+	check(app.arena.visible and app.arena.game.wall_mode == "pond" and app.arena.countdown_text == "3", "room arriving after game applies matching prepared arena before displaying it")
+	app.client.accept({"type": "left"})

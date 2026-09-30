@@ -21,6 +21,7 @@ var selected_wall_mode := "fixed"
 var networked := false
 var viewer_slot := -1
 var player_names: Array[String] = []
+var countdown_text := ""
 
 
 func _ready() -> void:
@@ -118,6 +119,11 @@ func _draw() -> void:
 	rounded_box(Rect2(416, 667, 402, 29), Color("f9e8ed"), 14.0)
 	centered_text("WASD / ARROWS + SPACE / ENTER" if networked else "P1  WASD  +  SPACE", Vector2(271, 687), 12 if networked else 14, Color("366b68"))
 	centered_text("ROOM HOST STARTS NEXT ROUND" if networked else "P2 ARROWS + ENTER  |  M NEXT MAP  R START", Vector2(617, 687), 12, Color("92536b"))
+	if networked and not countdown_text.is_empty():
+		draw_rect(BOARD_REGION, Color("44395488"))
+		rounded_box(Rect2(350, 246, 260, 188), Color("fffaf0"), 25.0)
+		centered_text("GET READY" if countdown_text != "GO" else "LET'S PLAY!", Vector2(480, 284), 18, Color("aa8a89"))
+		centered_text(countdown_text, Vector2(480, 390), 84, Color("403d57"))
 	if game.round_over:
 		draw_rect(Rect2(board.transform * game.ORIGIN, Vector2(game.WIDTH, game.HEIGHT) * game.CELL * board.scale), Color("44395488"))
 		var large_result: bool = game.players.size() > 4

@@ -51,3 +51,9 @@ func reset() -> void:
 	held_bombs.clear()
 	move_press = Vector2.ZERO
 	bomb_press = false
+
+
+func clear_pending() -> void:
+	# Keep physical key tracking so a held bomb needs release and a new press.
+	move_press = Vector2.ZERO
+	bomb_press = false

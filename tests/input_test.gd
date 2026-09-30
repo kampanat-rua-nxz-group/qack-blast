@@ -12,6 +12,7 @@ class RecordingClient extends "res://scripts/room_client.gd":
 
 
 func _initialize() -> void:
+	test_held_bomb_does_not_fire_at_go()
 	test_latest_held_key_wins()
 	test_alias_release_keeps_other_key()
 	test_repeat_does_not_reorder()
@@ -36,6 +37,8 @@ func test_online_input_lifecycle(app) -> void:
 	var joined: Dictionary = registry.create_room(10, "A")
 	registry.join_room(20, joined.code, "B")
 	registry.start_round(10)
+	check(registry.room_for_peer(10).phase == "countdown", "start enters authoritative countdown")
+	registry.tick(3.0)
 	recording.person_id = joined.person_id
 	recording.room = registry.room_view(registry.room_for_peer(10))
 	app._room_changed(recording.room)
@@ -75,6 +78,37 @@ func test_online_input_lifecycle(app) -> void:
 	app._input(key)
 	app._disconnected()
 	check(app.player_input.direction() == Vector2.ZERO, "disconnect resets held state")
+	var room: Dictionary = registry.room_for_peer(10)
+	room.phase = "results"
+	recording.room = registry.room_view(room)
+	app._room_changed(recording.room)
+	key.keycode = KEY_SPACE
+	key.physical_keycode = KEY_SPACE
+	key.pressed = true
+	app._input(key)
+	check(registry.start_round(10), "replay prepares countdown for held-bomb test")
+	recording.room = registry.room_view(room)
+	app._room_changed(recording.room)
+	key.keycode = KEY_D
+	key.physical_keycode = KEY_D
+	app._input(key)
+	var before_go: int = recording.messages.size()
+	app._physics_process(0.1)
+	check(recording.messages.size() == before_go, "countdown sends no gameplay commands")
+	registry.tick(3.0)
+	recording.room = registry.room_view(room)
+	app._room_changed(recording.room)
+	app._physics_process(1.0 / 30.0)
+	check(recording.messages.back().direction == [1.0, 0.0] and not recording.messages.back().plant, "held direction starts at GO without held results bomb")
+	key.keycode = KEY_SPACE
+	key.physical_keycode = KEY_SPACE
+	app._input(key)
+	check(not recording.messages.back().plant, "duplicate held press cannot plant at GO")
+	key.pressed = false
+	app._input(key)
+	key.pressed = true
+	app._input(key)
+	check(recording.messages.back().plant, "release and repress plants after GO")
 	recording.free()
 	finish()
 
@@ -139,3 +173,23 @@ func check(condition: bool, message: String) -> void:
 func finish() -> void:
 	print("Input checks: %d failure(s)" % failures)
 	quit(1 if failures else 0)
+
+
+func test_held_bomb_does_not_fire_at_go() -> void:
+	var intent = InputIntent.new()
+	for keycode in [KEY_SPACE, KEY_ENTER]:
+		intent.handle_key(keycode, true, false)
+		if not intent.has_method("clear_pending"):
+			check(false, "input can clear pending edges while retaining physically held bomb keys")
+			return
+		intent.clear_pending()
+		intent.handle_key(keycode, true, false)
+		intent.handle_key(keycode, true, true)
+		check(not intent.consume_bomb_press(), "held bomb cannot fire at GO or on repeat")
+		intent.handle_key(keycode, false, false)
+		intent.handle_key(keycode, true, false)
+		check(intent.consume_bomb_press(), "physical release and fresh bomb press work after GO")
+		intent.handle_key(keycode, false, false)
+	intent.handle_key(KEY_D, true, false)
+	intent.clear_pending()
+	check(intent.direction() == Vector2.RIGHT and intent.consume_move_press() == Vector2.ZERO, "GO retains held direction while discarding pre-GO movement edges")
