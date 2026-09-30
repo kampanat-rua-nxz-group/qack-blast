@@ -9,6 +9,9 @@ var phase := 0
 var elapsed := 0.0
 var room_code := ""
 var failures := 0
+var countdown_seen := [false, false]
+var countdown_input_sent := false
+var frozen_positions: Array = []
 
 
 func _initialize() -> void:
@@ -59,6 +62,20 @@ func _process(delta: float) -> bool:
 					phase = 3
 					break
 		3:
+			for i in range(2):
+				for message in inbox[i]:
+					if message.get("type") == "room" and message.phase == "countdown":
+						countdown_seen[i] = true
+			var prepared: Dictionary = server.registry.rooms[room_code]
+			if prepared.phase == "countdown":
+				if not countdown_input_sent:
+					frozen_positions = prepared.game.players.map(func(player): return player.pos)
+					request(1, {"type": "input", "direction": [-1, 0], "plant": true, "move_press": [-1, 0]})
+					countdown_input_sent = true
+				check(prepared.game.round_elapsed == 0.0 and prepared.game.bombs.is_empty() and prepared.game.players.map(func(player): return player.pos) == frozen_positions, "two-client countdown freezes movement bombs and clock")
+				return false
+			check(countdown_seen == [true, true] and prepared.round_id == 1, "both WebSocket clients observe the same single countdown start")
+			inbox[1] = inbox[1].filter(func(message): return message.get("type") != "game" or message.round_elapsed > 0.0)
 			for message in inbox[1]:
 				if message.get("type") == "game" and message.players.size() == 2:
 					var room: Dictionary = server.registry.rooms[room_code]
@@ -87,11 +104,11 @@ func _process(delta: float) -> bool:
 					if message.message != "Already in a room":
 						fail("late gameplay input shows an error on results: %s" % message.message)
 						return false
-					print("Network checks: 0 failure(s)")
+					print("Network checks: %d failure(s)" % failures)
 					server.socket.close()
 					for client in clients:
 						client.close()
-					quit(0)
+					quit(1 if failures else 0)
 					break
 	return false
 
@@ -103,6 +120,8 @@ func test_input_commands() -> void:
 	var room: Dictionary = registry.room_for_peer(10)
 	registry.join_room(20, room.code, "B")
 	registry.start_round(10)
+	check(registry.room_for_peer(10).phase == "countdown", "start enters authoritative countdown")
+	registry.tick(3.0)
 	var game = room.game
 	game.board[1][2] = 0
 	game.board[1][3] = 0

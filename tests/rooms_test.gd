@@ -28,6 +28,8 @@ func _initialize() -> void:
 	check(not registry.choose_map(10, "unknown"), "unknown maps are rejected")
 	check(registry.choose_map(10, "random"), "host can return to random map")
 	check(not registry.start_round(20) and registry.start_round(10), "only host can start with two to six players")
+	check(registry.room_for_peer(10).phase == "countdown", "start prepares a countdown")
+	registry.tick(3.0)
 	check(room.phase == "playing" and room.game.player_count == 6 and room.game.wall_mode == "random", "round uses selected map and six players")
 	var encoded := JSON.stringify(registry.game_view(room))
 	check(JSON.parse_string(encoded).players.size() == 6, "authoritative snapshot can be sent as JSON")
@@ -56,11 +58,18 @@ func _initialize() -> void:
 	check(not registry.choose_map(30, "frost") and not registry.start_round(30), "guest cannot change map or replay during results")
 	check(registry.choose_map(20, "frost"), "new host changes map during results")
 	check(registry.start_round(20), "new host starts a rematch")
+	check(registry.room_for_peer(20).phase == "countdown", "start prepares a countdown")
+	registry.tick(3.0)
 	check(room.code == code and room.people.size() == 7 and room.game.wall_mode == "frost", "rematch keeps room and uses chosen map")
 	check(room.game.scores[1].wins == 1, "rematch carries the surviving participant's score")
 	for peer_id in [20, 30, 40, 50, 60, 70]:
 		registry.leave(peer_id)
 	check(not registry.rooms.has(code), "room and scores disappear when last peer leaves")
+	test_countdown_freezes_game_clock()
+	test_countdown_transitions_once()
+	test_countdown_rejects_start_map_and_input()
+	test_lineup_departure_cancels_countdown()
+	test_late_join_spectates()
 	test_same_tick_bomb_blocks_press_and_held_input()
 	test_input_press_intent()
 	test_expanded_geometry_snapshot()
@@ -76,6 +85,8 @@ func test_map_round_snapshots() -> void:
 		var created: Dictionary = registry.create_room(100, "A")
 		registry.join_room(200, created.code, "B")
 		check(registry.choose_map(100, mode) and registry.start_round(100), "%s starts through host selection" % mode)
+		check(registry.room_for_peer(100).phase == "countdown", "start prepares a countdown")
+		registry.tick(3.0)
 		var room: Dictionary = registry.rooms[created.code]
 		var game = room.game
 		var special: int = {"fixed": 0, "random": 3, "pond": 4, "frost": 5, "night": 2}[mode]
@@ -92,6 +103,8 @@ func test_map_round_snapshots() -> void:
 		registry.tick(0.0)
 		check(room.phase == "results" and game.result == "PLAYER 2 WINS", "%s resolves after one survivor" % mode)
 		check(registry.start_round(100), "%s starts rematch" % mode)
+		check(registry.room_for_peer(100).phase == "countdown", "start prepares a countdown")
+		registry.tick(3.0)
 		room.game.players[0].alive = false
 		room.game.players[1].alive = false
 		room.game.resolve_round()
@@ -106,6 +119,8 @@ func test_same_tick_bomb_blocks_press_and_held_input() -> void:
 		var room: Dictionary = registry.room_for_peer(10)
 		registry.join_room(20, room.code, "B")
 		registry.start_round(10)
+		check(registry.room_for_peer(10).phase == "countdown", "start prepares a countdown")
+		registry.tick(3.0)
 		var game = room.game
 		game.board[1][2] = 0
 		game.players[1].pos = game.center(Vector2i(2, 1))
@@ -123,6 +138,8 @@ func test_input_press_intent() -> void:
 	var room: Dictionary = registry.room_for_peer(10)
 	registry.join_room(20, room.code, "B")
 	registry.start_round(10)
+	check(registry.room_for_peer(10).phase == "countdown", "start prepares a countdown")
+	registry.tick(3.0)
 	var game = room.game
 	game.board[1][2] = 0
 	game.board[1][3] = 0
@@ -182,6 +199,8 @@ func test_snapshot_identity_and_targets() -> void:
 	var room: Dictionary = registry.rooms[created.code]
 	check(registry.room_view(room).get("round_id", -1) == 0, "lobby has initial round identity")
 	registry.start_round(1)
+	check(registry.room_for_peer(1).phase == "countdown", "start prepares a countdown")
+	registry.tick(3.0)
 	room.game.board[1][2] = 0
 	registry.set_input(1, Vector2.RIGHT, false)
 	registry.tick(0.016)
@@ -195,6 +214,8 @@ func test_snapshot_identity_and_targets() -> void:
 	room.game.resolve_round()
 	registry.tick(0.0)
 	registry.start_round(1)
+	check(registry.room_for_peer(1).phase == "countdown", "start prepares a countdown")
+	registry.tick(3.0)
 	var rematch: Dictionary = registry.game_view(room)
 	check(rematch.get("round_id", 0) == 2, "each rematch increments round identity")
 	check(rematch.get("snapshot_seq", 0) > second.get("snapshot_seq", 0), "sequence remains monotonic across rematches")
@@ -206,6 +227,8 @@ func test_expanded_geometry_snapshot() -> void:
 	var created: Dictionary = registry.create_room(1, "A")
 	registry.join_room(2, created.code, "B")
 	registry.start_round(1)
+	check(registry.room_for_peer(1).phase == "countdown", "start prepares a countdown")
+	registry.tick(3.0)
 	var room: Dictionary = registry.rooms[created.code]
 	for count in range(2, 11):
 		room.game.player_count = count
@@ -213,3 +236,85 @@ func test_expanded_geometry_snapshot() -> void:
 		var snapshot: Dictionary = JSON.parse_string(JSON.stringify(registry.game_view(room)))
 		check(snapshot.geometry.width == room.game.WIDTH and snapshot.geometry.height == room.game.HEIGHT and snapshot.geometry.cell == room.game.CELL and snapshot.geometry.origin == [room.game.ORIGIN.x, room.game.ORIGIN.y], "snapshot carries selected %d-player authoritative geometry" % count)
 		check(snapshot.players.size() == count and snapshot.board.size() == snapshot.geometry.height and snapshot.board[0].size() == snapshot.geometry.width, "snapshot arrays match %d-player geometry" % count)
+
+
+func countdown_registry():
+	var registry = load("res://scripts/room_registry.gd").new()
+	registry.create_room(10, "A")
+	registry.join_room(20, registry.room_for_peer(10).code, "B")
+	check(registry.start_round(10), "host prepares first round")
+	return registry
+
+
+func test_countdown_freezes_game_clock() -> void:
+	var registry = countdown_registry()
+	var room: Dictionary = registry.room_for_peer(10)
+	var start: Vector2 = room.game.players[0].pos
+	check(room.phase == "countdown" and registry.room_view(room).get("countdown_remaining", -1) == 3.0, "first start exposes three seconds")
+	registry.tick(1.0)
+	check(room.phase == "countdown" and registry.room_view(room).get("countdown_remaining", -1) == 2.0, "authoritative countdown advances")
+	check(room.game.round_elapsed == 0.0 and room.game.players[0].pos == start and room.game.bombs.is_empty(), "countdown freezes clock and rule state")
+
+
+func test_countdown_transitions_once() -> void:
+	var registry = countdown_registry()
+	var room: Dictionary = registry.room_for_peer(10)
+	var game = room.game
+	registry.tick(3.25)
+	check(room.phase == "playing" and is_equal_approx(game.round_elapsed, 0.25), "large crossing tick uses only residual gameplay delta")
+	registry.tick(0.5)
+	check(room.game == game and room.round_id == 1 and is_equal_approx(game.round_elapsed, 0.75), "GO transitions once without rebuilding the round")
+	registry.leave(20)
+	registry.tick(29.99)
+	check(game.players[1].alive, "active disconnect retains avatar before thirty seconds")
+	registry.tick(0.02)
+	check(not game.players[1].alive and room.phase == "results", "active disconnect grace expires at thirty seconds")
+
+
+func test_countdown_rejects_start_map_and_input() -> void:
+	var registry = countdown_registry()
+	var room: Dictionary = registry.room_for_peer(10)
+	check(not registry.start_round(10) and not registry.start_round(20), "countdown rejects repeated and guest start")
+	check(not registry.choose_map(10, "night"), "countdown locks selected map")
+	check(not registry.set_input(10, Vector2.RIGHT, true, Vector2.RIGHT), "countdown ignores held and edge gameplay input")
+	registry.tick(3.0)
+	check(room.round_id == 1 and room.game.bombs.is_empty() and room.game.round_elapsed == 0.0 and room.directions[0] == Vector2.ZERO and room.move_presses[0] == Vector2.ZERO, "GO clears countdown input without consuming countdown time")
+	check(registry.set_input(10, Vector2.ZERO, true), "fresh gameplay input accepted after GO")
+	registry.tick(0.016)
+	check(room.game.bombs.size() == 1, "fresh bomb press plants after GO")
+
+
+func test_lineup_departure_cancels_countdown() -> void:
+	var registry = countdown_registry()
+	var room: Dictionary = registry.room_for_peer(10)
+	room.people[1].scores.wins = 2
+	room.people[1].scores.kills = 3
+	var code: String = room.code
+	registry.join_room(30, code, "C")
+	registry.leave(10)
+	check(room.phase == "lobby" and room.game == null and room.lineup.is_empty() and room.directions.is_empty() and room.plants.is_empty() and room.move_presses.is_empty() and room.input_remaining.is_empty(), "lineup departure clears prepared round and all input buffers")
+	check(room.people.all(func(person): return person.slot == -1) and room.host == room.people[1].id, "cancellation resets every slot and transfers host")
+	check(room.people[1].scores == {"wins": 2, "kills": 3} and room.wall_mode == "fixed", "cancellation retains scores and selected map")
+	check(not registry.room_view(room).get("notice", "").is_empty(), "cancellation explains return to lobby")
+	check(registry.start_round(20), "new host starts with fresh connected lineup")
+	check(room.lineup == [room.people[1].id, room.people[2].id] and room.round_id == 2 and room.game.scores[0].wins == 2, "fresh lineup excludes departed member and retains score")
+	registry.leave(20)
+	registry.leave(30)
+	check(not registry.rooms.has(code), "last countdown departure deletes empty room")
+
+
+func test_late_join_spectates() -> void:
+	var registry = countdown_registry()
+	var room: Dictionary = registry.room_for_peer(10)
+	var lineup: Array = room.lineup.duplicate()
+	registry.join_room(30, room.code, "C")
+	check(room.people.back().slot == -1 and room.lineup == lineup and room.game.players.size() == 2, "countdown join stays outside frozen lineup")
+	registry.leave(30)
+	check(room.phase == "countdown", "spectator departure preserves countdown")
+	registry.join_room(40, room.code, "D")
+	registry.tick(3.0)
+	check(not registry.set_input(40, Vector2.RIGHT, true), "late join cannot control prepared round")
+	room.game.players[0].alive = false
+	room.game.resolve_round()
+	registry.tick(0.0)
+	check(registry.start_round(10) and room.phase == "countdown" and room.game.players.size() == 3 and room.people.back().slot == 2, "rematch countdown includes spectator in fresh lineup")

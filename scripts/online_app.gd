@@ -38,6 +38,9 @@ var player_input = PlayerInput.new()
 var input_focused := true
 var input_clock := 0.0
 var presentation = ArenaPresentation.new()
+var input_phase := ""
+var go_remaining := 0.0
+var arena_round_id := -1
 
 
 func _ready() -> void:
@@ -171,6 +174,11 @@ func request(message: Dictionary) -> void:
 
 func _process(delta: float) -> void:
 	_connection_actions(connection_flow.advance(delta))
+	if go_remaining > 0.0:
+		go_remaining = maxf(0.0, go_remaining - delta)
+		if go_remaining == 0.0:
+			arena.countdown_text = ""
+			arena.queue_redraw()
 	if arena.visible:
 		arena.present_board(presentation.sample(Time.get_ticks_usec() / 1000000.0))
 
@@ -227,19 +235,28 @@ func _rejoin_room() -> void:
 
 
 func _room_changed(room: Dictionary) -> void:
+	if not client.game.is_empty() and int(client.game.round_id) == int(room.round_id) and arena_round_id != int(room.round_id):
+		_game_changed(client.game)
+		return
 	var playing: bool = room.phase == "playing"
+	var countdown: bool = room.phase == "countdown"
 	var showing_results: bool = room.phase == "results"
-	if arena.visible and not playing:
-		_reset_input()
-	elif playing and not arena.visible:
-		_reset_input(false)
-		var focused := get_viewport().gui_get_focus_owner()
-		if focused != null:
-			focused.release_focus()
+	if input_phase != room.phase:
+		player_input.clear_pending()
+		input_clock = 0.0
+		if playing:
+			if input_phase == "countdown":
+				go_remaining = 0.6
+			var focused := get_viewport().gui_get_focus_owner()
+			if focused != null:
+				focused.release_focus()
+		input_phase = room.phase
 	if showing_results and not results.visible:
 		results.clear_feedback()
-	lobby.visible = not playing and not showing_results
-	arena.visible = playing
+	var matched: bool = arena_round_id == int(room.round_id)
+	arena.visible = (playing or countdown) and matched
+	lobby.visible = not arena.visible and not showing_results
+	arena.countdown_text = str(int(ceil(room.countdown_remaining))) if countdown else ("GO" if go_remaining > 0.0 and playing else "")
 	results.visible = showing_results
 	arena.player_names.clear()
 	for person in room.people:
@@ -262,18 +279,24 @@ func _room_changed(room: Dictionary) -> void:
 	for person in room.people:
 		if person.connected:
 			connected_count += 1
-	map_button.disabled = not host or playing
-	start_button.disabled = not host or playing or connected_count < 2
+	map_button.disabled = not host or playing or countdown
+	start_button.disabled = not host or playing or countdown or connected_count < 2
 	leave_button.disabled = false
 	if room.phase == "results" and not client.game.is_empty():
 		status_label.text = "Round over: %s. The host can start another round." % arena.round_result_text()
 	elif room.phase == "lobby":
-		status_label.text = "Waiting for 2–6 players."
+		status_label.text = room.get("notice", "") if not room.get("notice", "").is_empty() else "Waiting for 2–6 players."
+	elif (playing or countdown) and not matched:
+		status_label.text = "Preparing the next round…"
+	elif countdown:
+		status_label.text = "Round starts in %d…" % int(ceil(room.countdown_remaining))
 	if showing_results:
-		results.present(room, client.game, client.person_id)
+		results.present(room, client.game if matched else {}, client.person_id)
 
 
 func _game_changed(snapshot: Dictionary) -> void:
+	if not client.room.is_empty() and int(snapshot.round_id) != int(client.room.round_id):
+		return
 	if not presentation.accepts_snapshot(snapshot):
 		return
 	presentation.push_snapshot(snapshot, Time.get_ticks_usec() / 1000000.0)
@@ -312,6 +335,7 @@ func _game_changed(snapshot: Dictionary) -> void:
 	game.round_over = snapshot.round_over
 	game.result = snapshot.result
 	game.wall_mode = snapshot.wall_mode
+	arena_round_id = int(snapshot.round_id)
 	arena.viewer_slot = -1
 	if not client.room.is_empty():
 		for person in client.room.people:
@@ -319,18 +343,23 @@ func _game_changed(snapshot: Dictionary) -> void:
 				arena.viewer_slot = person.slot
 				break
 	arena.present_board(presentation.sample(Time.get_ticks_usec() / 1000000.0))
+	if not client.room.is_empty():
+		_room_changed(client.room)
 	if not client.room.is_empty() and client.room.phase == "results":
 		status_label.text = "Round over: %s. The host can start another round." % arena.round_result_text()
 		results.present(client.room, snapshot, client.person_id)
 
 
 func _input(event: InputEvent) -> void:
-	if not input_focused or client.room.is_empty() or client.room.phase != "playing" or not event is InputEventKey:
+	if not input_focused or client.room.is_empty() or not event is InputEventKey:
 		return
 	var key := event as InputEventKey
 	var previous: Vector2 = player_input.direction()
 	var keycode: int = key.physical_keycode if key.physical_keycode != 0 else key.keycode
 	player_input.handle_key(keycode, key.pressed, key.echo)
+	if client.room.phase != "playing":
+		player_input.clear_pending()
+		return
 	var press: Vector2 = player_input.consume_move_press()
 	var plant: bool = player_input.consume_bomb_press()
 	if previous != player_input.direction() or press != Vector2.ZERO or plant:
@@ -357,6 +386,7 @@ func _send_input(move_press: Vector2 = Vector2.ZERO, plant: bool = false) -> voi
 
 func _reset_input(send_neutral: bool = true) -> void:
 	player_input.reset()
+	input_phase = ""
 	input_clock = 0.0
 	if send_neutral and not client.room.is_empty():
 		_send_input()
@@ -393,6 +423,9 @@ func _show_error(message: String) -> void:
 
 func _left_room() -> void:
 	presentation.reset()
+	go_remaining = 0.0
+	arena_round_id = -1
+	arena.countdown_text = ""
 	arena.present_board()
 	connection_flow.cancel()
 	_connection_actions(connection_flow.advance(0.0))
