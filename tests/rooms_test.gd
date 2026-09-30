@@ -61,6 +61,7 @@ func _initialize() -> void:
 	for peer_id in [20, 30, 40, 50, 60, 70]:
 		registry.leave(peer_id)
 	check(not registry.rooms.has(code), "room and scores disappear when last peer leaves")
+	test_same_tick_bomb_blocks_press_and_held_input()
 	test_input_press_intent()
 	test_map_round_snapshots()
 	finish()
@@ -94,6 +95,24 @@ func test_map_round_snapshots() -> void:
 		room.game.resolve_round()
 		registry.tick(0.0)
 		check(room.phase == "results" and room.game.result == "DRAW", "%s draws when last ducks die together" % mode)
+
+
+func test_same_tick_bomb_blocks_press_and_held_input() -> void:
+	for use_press in [false, true]:
+		var registry = load("res://scripts/room_registry.gd").new()
+		registry.create_room(10, "A")
+		var room: Dictionary = registry.room_for_peer(10)
+		registry.join_room(20, room.code, "B")
+		registry.start_round(10)
+		var game = room.game
+		game.board[1][2] = 0
+		game.players[1].pos = game.center(Vector2i(2, 1))
+		var start: Vector2 = game.players[1].pos
+		registry.set_input(10, Vector2.ZERO, true)
+		registry.set_input(20, Vector2.ZERO if use_press else Vector2.LEFT, false, Vector2.LEFT if use_press else Vector2.ZERO)
+		registry.tick(0.016)
+		check(game.bombs.size() == 1 and game.bombs[0].owner == 0, "earlier slot plants bomb in same tick")
+		check(game.players[1].pos == start and game.move_targets[1] == Vector2.ZERO, "%s movement blocks bomb planted by earlier slot in same tick" % ("press" if use_press else "held"))
 
 
 func test_input_press_intent() -> void:

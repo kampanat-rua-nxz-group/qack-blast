@@ -222,7 +222,7 @@ func overlaps_tile(pos: Vector2, tile: Vector2i) -> bool:
 	return false
 
 
-func step(delta: float, directions: Array, plant_requests: Array) -> void:
+func step(delta: float, directions: Array, plant_requests: Array, move_presses: Array = []) -> void:
 	if round_over:
 		return
 	var remaining := delta
@@ -246,17 +246,19 @@ func step(delta: float, directions: Array, plant_requests: Array) -> void:
 		if not first_slice:
 			requests.resize(players.size())
 			requests.fill(false)
-		step_slice(slice, directions, requests)
+		step_slice(slice, directions, requests, move_presses if first_slice else [])
 		first_slice = false
 		remaining -= slice
 	if not round_over:
 		schedule_hazards(round_elapsed)
 
 
-func step_slice(delta: float, directions: Array, plant_requests: Array) -> void:
+func step_slice(delta: float, directions: Array, plant_requests: Array, move_presses: Array = []) -> void:
 	for i in range(players.size()):
 		if not players[i].alive:
 			continue
+		if i < move_presses.size() and move_presses[i] != Vector2.ZERO and move_targets[i] == Vector2.ZERO:
+			start_move(i, move_presses[i])
 		move_player(i, delta, directions[i])
 		if plant_requests[i]:
 			place_bomb(i)

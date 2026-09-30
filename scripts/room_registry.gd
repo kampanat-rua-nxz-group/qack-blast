@@ -158,12 +158,8 @@ func tick(delta: float) -> void:
 				person.disconnect_remaining -= delta
 				if person.disconnect_remaining <= 0.0:
 					room.game.players[person.slot].alive = false
-		for i in range(room.move_presses.size()):
-			var press: Vector2 = room.move_presses[i]
-			if press != Vector2.ZERO and room.game.players[i].alive and room.game.move_targets[i] == Vector2.ZERO:
-				room.game.start_move(i, press)
-			room.move_presses[i] = Vector2.ZERO
-		room.game.step(delta, room.directions, room.plants)
+		room.game.step(delta, room.directions, room.plants, room.move_presses)
+		room.move_presses.fill(Vector2.ZERO)
 		for i in range(room.plants.size()):
 			room.plants[i] = false
 		if room.game.round_over:
