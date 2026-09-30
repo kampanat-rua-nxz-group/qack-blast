@@ -61,6 +61,7 @@ func _initialize() -> void:
 	for peer_id in [20, 30, 40, 50, 60, 70]:
 		registry.leave(peer_id)
 	check(not registry.rooms.has(code), "room and scores disappear when last peer leaves")
+	test_input_press_intent()
 	test_map_round_snapshots()
 	finish()
 
@@ -93,6 +94,53 @@ func test_map_round_snapshots() -> void:
 		room.game.resolve_round()
 		registry.tick(0.0)
 		check(room.phase == "results" and room.game.result == "DRAW", "%s draws when last ducks die together" % mode)
+
+
+func test_input_press_intent() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	registry.create_room(10, "A")
+	var room: Dictionary = registry.room_for_peer(10)
+	registry.join_room(20, room.code, "B")
+	registry.start_round(10)
+	var game = room.game
+	game.board[1][2] = 0
+	game.board[1][3] = 0
+	var start: Vector2 = game.players[0].pos
+	check(not registry.set_input(10, Vector2.RIGHT, true, Vector2(1, 1)), "diagonal press rejects entire input")
+	check(not registry.set_input(10, Vector2.RIGHT, true, Vector2(2, 0)), "noncardinal press rejects entire input")
+	registry.tick(0.016)
+	check(game.players[0].pos == start and game.bombs.is_empty(), "invalid press cannot move or plant")
+	check(registry.set_input(10, Vector2.RIGHT, false, Vector2.RIGHT), "cardinal press accepted")
+	registry.set_input(10, Vector2.ZERO, false)
+	registry.tick(0.016)
+	check(game.players[0].pos.x > start.x, "press then release between ticks starts movement from rest")
+	registry.tick(0.19)
+	registry.tick(0.19)
+	check(game.players[0].pos == start + Vector2(game.CELL, 0), "short press produces exactly one tile step")
+	registry.set_input(10, Vector2.RIGHT, false)
+	registry.tick(0.016)
+	registry.set_input(10, Vector2.ZERO, false, Vector2.RIGHT)
+	registry.tick(0.016)
+	registry.tick(0.19)
+	registry.tick(0.19)
+	check(game.players[0].pos == start + Vector2(game.CELL * 2, 0), "press during movement does not queue another step")
+	game.players[0].pos = start
+	game.move_targets[0] = Vector2.ZERO
+	registry.set_input(10, Vector2.RIGHT, false)
+	registry.tick(0.016)
+	registry.tick(0.19)
+	registry.tick(0.19)
+	check(game.players[0].pos == start + Vector2(game.CELL, 0), "expired held input stops after current tile")
+	game.players[0].pos = start
+	game.move_targets[0] = Vector2.ZERO
+	registry.set_input(10, Vector2.UP, false, Vector2.UP)
+	registry.set_input(10, Vector2.ZERO, false)
+	registry.tick(0.016)
+	check(game.players[0].pos == start, "press intent respects wall collision")
+	registry.set_input(10, Vector2.RIGHT, false, Vector2.RIGHT)
+	registry.leave(10)
+	registry.tick(0.016)
+	check(game.players[0].pos == start, "disconnect clears pending press before next tick")
 
 
 func check(condition: bool, message: String) -> void:

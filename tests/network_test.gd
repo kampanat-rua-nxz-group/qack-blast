@@ -8,9 +8,14 @@ var inbox := [[], []]
 var phase := 0
 var elapsed := 0.0
 var room_code := ""
+var failures := 0
 
 
 func _initialize() -> void:
+	test_input_commands()
+	if failures:
+		quit(1)
+		return
 	var error := server.listen(19087)
 	if error != OK:
 		fail("server listens on localhost: %d" % error)
@@ -56,6 +61,9 @@ func _process(delta: float) -> bool:
 		3:
 			for message in inbox[1]:
 				if message.get("type") == "game" and message.players.size() == 2:
+					var room: Dictionary = server.registry.rooms[room_code]
+					room.game.board[9][10] = 0
+					request(1, {"type": "input", "direction": [-1, 0], "move_press": [-1, 0]})
 					request(1, {"type": "input", "direction": [0, 0], "plant": true})
 					phase = 4
 					inbox[1].clear()
@@ -64,6 +72,9 @@ func _process(delta: float) -> bool:
 			for message in inbox[1]:
 				if message.get("type") == "game" and message.bombs.size() == 1 and message.bombs[0].owner == 1:
 					var room = server.registry.rooms[room_code]
+					if room.game.players[1].pos.x >= room.game.center(Vector2i(11, 9)).x:
+						fail("WebSocket short press survives release before next server tick")
+						return false
 					room.phase = "results"
 					inbox[1].clear()
 					request(1, {"type": "input", "direction": [0, 0], "plant": false})
@@ -83,6 +94,55 @@ func _process(delta: float) -> bool:
 					quit(0)
 					break
 	return false
+
+
+func test_input_commands() -> void:
+	var input_server = RoomServer.new()
+	var registry = input_server.registry
+	registry.create_room(10, "A")
+	var room: Dictionary = registry.room_for_peer(10)
+	registry.join_room(20, room.code, "B")
+	registry.start_round(10)
+	var game = room.game
+	game.board[1][2] = 0
+	game.board[1][3] = 0
+	var start: Vector2 = game.players[0].pos
+	for invalid in [[1, 1], [2, 0], ["1", 0], [1], null, true]:
+		input_server.handle(10, {"type": "input", "direction": [1, 0], "plant": true, "move_press": invalid})
+	registry.tick(0.016)
+	check(game.players[0].pos == start and game.bombs.is_empty(), "malformed and diagonal network press reject entire command")
+	game.players[0].pos = start
+	game.move_targets[0] = Vector2.ZERO
+	game.bombs.clear()
+	registry.set_input(10, Vector2.ZERO, false)
+	input_server.handle(10, {"type": "input", "direction": [1, 0], "move_press": [1, 0], "slot": 1})
+	input_server.handle(10, {"type": "input", "direction": [0, 0]})
+	registry.tick(0.016)
+	check(game.players[0].pos.x > start.x and game.players[1].pos == game.center(Vector2i(11, 9)), "network short press moves only sender's duck")
+	registry.tick(0.19)
+	registry.tick(0.19)
+	check(game.players[0].pos == start + Vector2(game.CELL, 0), "network short press moves exactly one tile")
+	input_server.handle(10, {"type": "input", "direction": [1, 0]})
+	registry.tick(0.016)
+	input_server.handle(10, {"type": "input", "direction": [0, 0], "move_press": [1, 0]})
+	registry.tick(0.016)
+	registry.tick(0.19)
+	registry.tick(0.19)
+	check(game.players[0].pos == start + Vector2(game.CELL * 2, 0), "network press while moving does not queue a tile")
+	game.players[0].pos = start
+	game.move_targets[0] = Vector2.ZERO
+	input_server.handle(10, {"type": "input", "direction": [1, 0]})
+	registry.tick(0.016)
+	registry.tick(0.19)
+	registry.tick(0.19)
+	check(game.players[0].pos == start + Vector2(game.CELL, 0), "network held input expires without heartbeat")
+
+
+func check(condition: bool, message: String) -> void:
+	if not condition:
+		failures += 1
+		push_error(message)
+		print("Network input failure: %s" % message)
 
 
 func request(i: int, message: Dictionary) -> void:
