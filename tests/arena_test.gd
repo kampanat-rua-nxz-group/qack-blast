@@ -4,6 +4,12 @@ var failures := 0
 
 
 func _initialize() -> void:
+	test_board_profiles_and_rejections()
+	test_expanded_spawn_fairness()
+	test_ten_player_scoring_and_pickups()
+	test_large_kicked_bomb_blockers()
+	test_large_night_protection()
+	test_large_hazard_progression()
 	test_game_runs_without_scene()
 	var scene := load("res://scenes/arena.tscn")
 	check(scene != null, "arena scene loads")
@@ -1095,3 +1101,269 @@ func test_display_scale_does_not_change_rules(arena) -> void:
 	arena.walk_phase[0] = 1.2
 	arena.present_board()
 	check(board.player_position(0) == arena.game.players[0].pos and board.player_facing(0) == 0.7 and board.player_walk_phase(0) == 1.2, "empty display state preserves existing authoritative animation")
+
+
+func test_board_profiles_and_rejections() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	for count in range(2, 11):
+		game.player_count = count
+		check(game.new_round() == true, "supported %d-player round succeeds" % count)
+		var expected := Vector2i(13, 11) if count < 4 else (Vector2i(15, 13) if count < 7 else (Vector2i(17, 15) if count < 9 else Vector2i(19, 17)))
+		check(Vector2i(game.WIDTH, game.HEIGHT) == expected, "%d-player authoritative profile" % count)
+		check(game.CELL == (52.0 if count < 4 else 44.0), "%d-player rule cell is independent of display scaling" % count)
+		check(game.ORIGIN == (Vector2(142, 82) if count < 4 else Vector2(150, 82)), "existing authoritative origin convention")
+		check(game.players.size() == count and game.scores.size() >= count, "%d-player lineup and score slots" % count)
+		if count <= 6:
+			var old_spawns := [Vector2i(1, 1), Vector2i(game.WIDTH - 2, game.HEIGHT - 2), Vector2i(game.WIDTH - 2, 1), Vector2i(1, game.HEIGHT - 2), Vector2i(game.WIDTH / 2, 1), Vector2i(game.WIDTH / 2, game.HEIGHT - 2)]
+			for i in range(count):
+				check(game.tile_at(game.players[i].pos) == old_spawns[i], "legacy player order and spawn geometry preserved")
+	var before: String = var_to_str([game.board, game.terrain, game.players, game.bombs, game.flames, game.pickups, game.scores, game.move_targets, game.WIDTH, game.HEIGHT, game.CELL, game.ORIGIN])
+	var rng_before: int = game.rng.state
+	for count in [-100, -1, 0, 1, 11, 100]:
+		check(game.configure_map(count) == false, "unsupported profile rejects %d" % count)
+		game.player_count = count
+		check(game.new_round() == false, "unsupported round rejects %d" % count)
+		check(var_to_str([game.board, game.terrain, game.players, game.bombs, game.flames, game.pickups, game.scores, game.move_targets, game.WIDTH, game.HEIGHT, game.CELL, game.ORIGIN]) == before and game.rng.state == rng_before, "unsupported count leaves rules and RNG unchanged")
+
+
+func test_expanded_spawn_fairness() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	check(game.has_method("spawn_candidates"), "rules expose perimeter spawn candidates")
+	if not game.has_method("spawn_candidates"):
+		return
+	for count in range(7, 11):
+		game.player_count = count
+		var omitted := {}
+		var first_slots := {}
+		for mode in game.MAP_MODES:
+			game.wall_mode = mode
+			for seed_value in range(100):
+				game.rng.seed = seed_value
+				check(game.new_round(), "expanded round succeeds")
+				var label := "%s %d players seed %d" % [mode, count, seed_value]
+				var candidates: Array = game.spawn_candidates(count)
+				var selected := {}
+				var reachable := reachable_open_tiles(game, game.tile_at(game.players[0].pos))
+				for i in range(count):
+					var spawn: Vector2i = game.tile_at(game.players[i].pos)
+					check(candidates.has(spawn) and not selected.has(spawn), label + " distinct perimeter spawn")
+					selected[spawn] = true
+					check(spawn.x > 0 and spawn.y > 0 and spawn.x < game.WIDTH - 1 and spawn.y < game.HEIGHT - 1 and game.board[spawn.y][spawn.x] == game.OPEN, label + " inside and open")
+					check(game.terrain[spawn.y][spawn.x] == 0 and reachable.has(spawn), label + " dry and connected")
+					for other in selected:
+						check(other == spawn or absi(other.x - spawn.x) + absi(other.y - spawn.y) >= 4, label + " spawn spacing")
+					var exits := 0
+					for direction in game.DIRECTIONS:
+						if not game.solid(spawn + direction, i):
+							exits += 1
+					check(exits >= 2, label + " two legal first moves")
+					var route := safe_spawn_escape(game, spawn)
+					check(not route.is_empty() and route.size() * game.CELL / game.SPEED < game.FUSE, label + " escape beyond initial blast before fuse")
+					game.place_bomb(i)
+					var previous := spawn
+					for tile in route:
+						game.move_player(i, game.CELL / game.SPEED + 0.001, Vector2(tile - previous))
+						check(game.players[i].pos == game.center(tile), label + " escape uses actual movement")
+						previous = tile
+					game.update_bombs(game.FUSE)
+					game.step_slice(0.0, neutral_inputs(count), neutral_plants(count))
+					check(game.players[i].alive, label + " survives own initial bomb")
+					game.flames.clear()
+					game.players[i].pos = game.center(spawn)
+					game.players[i].safe_bomb = Vector2i(-1, -1)
+				first_slots[game.tile_at(game.players[0].pos)] = true
+				for candidate in candidates:
+					if not selected.has(candidate):
+						omitted[candidate] = true
+				# Permanent map identity must survive spawn protection.
+				if mode == "fixed":
+					for y in range(2, game.HEIGHT - 1, 2):
+						for x in range(2, game.WIDTH - 1, 2):
+							check(game.board[y][x] == game.WALL, label + " Classic pillar preserved")
+				elif mode in ["pond", "frost"]:
+					var offset := Vector2i((game.WIDTH - 13) / 2, (game.HEIGHT - 11) / 2)
+					var pillars: Array[Vector2i] = []
+					if mode == "pond":
+						pillars = [Vector2i(4, 3), Vector2i(4, 5), Vector2i(4, 7), Vector2i(8, 3), Vector2i(8, 5), Vector2i(8, 7), Vector2i(6, 2), Vector2i(6, 8), Vector2i(2, 5), Vector2i(10, 5)]
+					else:
+						for x in [3, 6, 9]:
+							for y in [2, 4, 6, 8]:
+								pillars.append(Vector2i(x, y))
+					for pillar in pillars:
+						var tile: Vector2i = pillar + offset
+						check(game.board[tile.y][tile.x] == game.WALL, label + " all centered pillars preserved")
+		check(first_slots.size() == (8 if count < 9 else 10), "seeded permutation rotates first participant across all candidates")
+		if count % 2 == 1:
+			check(omitted.size() == count + 1, "odd-count omission rotates across all candidates")
+	for count in [0, 1, 11]:
+		check(game.spawn_candidates(count).is_empty(), "unsupported candidate count rejected")
+
+
+func safe_spawn_escape(game, spawn: Vector2i) -> Array[Vector2i]:
+	var queue := [spawn]
+	var previous := {spawn: spawn}
+	while not queue.is_empty():
+		var tile: Vector2i = queue.pop_front()
+		if absi(tile.x - spawn.x) + absi(tile.y - spawn.y) > 1:
+			var route: Array[Vector2i] = []
+			while tile != spawn:
+				route.push_front(tile)
+				tile = previous[tile]
+			return route
+		for direction in game.DIRECTIONS:
+			var next: Vector2i = tile + direction
+			if game.inside(next) and game.board[next.y][next.x] == game.OPEN and not previous.has(next):
+				previous[next] = tile
+				queue.append(next)
+	return []
+
+
+func neutral_inputs(count: int) -> Array:
+	var inputs := []
+	inputs.resize(count)
+	inputs.fill(Vector2.ZERO)
+	return inputs
+
+
+func neutral_plants(count: int) -> Array:
+	var plants := []
+	plants.resize(count)
+	plants.fill(false)
+	return plants
+
+
+func test_ten_player_scoring_and_pickups() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.player_count = 10
+	game.new_round()
+	for i in range(9):
+		game.flames.append({"tile": game.tile_at(game.players[i].pos), "owner": 9, "distance": 1, "time": game.FLAME_TIME})
+	game.step(0.016, neutral_inputs(10), neutral_plants(10))
+	check(game.result == "PLAYER 10 WINS" and game.scores[9].wins == 1 and game.scores[9].kills == 9, "tenth slot can win and receives nine distinct Kills")
+	game.step(0.016, neutral_inputs(10), neutral_plants(10))
+	check(game.scores[9].wins == 1 and game.scores[9].kills == 9, "ten-player result awards only once")
+	game.new_round()
+	check(game.scores[9].wins == 1 and game.scores[9].kills == 9, "ten-player scores persist through rematch")
+	for player in game.players:
+		game.flames.append({"tile": game.tile_at(player.pos), "owner": -1, "distance": 0, "time": game.FLAME_TIME})
+	game.step(0.016, neutral_inputs(10), neutral_plants(10))
+	check(game.result == "DRAW" and game.scores[9].wins == 1 and game.scores[9].kills == 9, "ten simultaneous neutral deaths draw without score credit")
+	game.new_round()
+	clear_crates(game)
+	game.players[7].pos = game.center(Vector2i(7, 3))
+	game.players[8].pos = game.center(Vector2i(1, 15))
+	game.players[9].pos = game.center(Vector2i(17, 15))
+	game.bombs = [{"tile": Vector2i(3, 3), "owner": 8, "range": 2, "time": 0.0}, {"tile": Vector2i(5, 3), "owner": 9, "range": 3, "time": game.FUSE}]
+	game.step(0.016, neutral_inputs(10), neutral_plants(10))
+	check(not game.players[7].alive and game.scores[9].kills == 10 and game.scores[8].kills == 0, "high-slot triggered bomb owns chain Kill")
+	game.new_round()
+	var spawn: Vector2i = game.tile_at(game.players[9].pos)
+	for kind in [game.PICKUP_BOMB_CAPACITY, game.PICKUP_BLAST_RANGE, game.PICKUP_VISION, game.PICKUP_MYSTERY, game.PICKUP_SPEED, game.PICKUP_BOMB_KICK]:
+		var player: Dictionary = game.players[9]
+		player.bomb_limit = 5 if kind == game.PICKUP_MYSTERY else 1
+		player.range = 1
+		game.pickups[spawn] = kind
+		game.step(0.016, neutral_inputs(10), neutral_plants(10))
+		check(not game.pickups.has(spawn), "tenth slot consumes pickup kind %d" % kind)
+		match kind:
+			game.PICKUP_BOMB_CAPACITY: check(player.bomb_limit == 2, "tenth slot capacity upgrade")
+			game.PICKUP_BLAST_RANGE, game.PICKUP_MYSTERY: check(player.range == 2, "tenth slot range/mystery upgrade")
+			game.PICKUP_VISION: check(player.vision == 2, "tenth slot Sight upgrade")
+			game.PICKUP_SPEED: check(player.speed_bonus == game.SPEED_PICKUP_INCREMENT, "tenth slot Speed upgrade")
+			game.PICKUP_BOMB_KICK: check(player.can_kick, "tenth slot Kick upgrade")
+
+
+func test_large_kicked_bomb_blockers() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.player_count = 10
+	game.wall_mode = "frost"
+	game.new_round()
+	clear_crates(game)
+	for blocker in [game.WALL, game.CRATE, game.DEEP_WATER]:
+		game.board[1][16] = blocker
+		game.bombs = [{"tile": Vector2i(14, 1), "owner": 9, "range": 1, "time": game.FUSE}]
+		check(game.try_kick_bomb(Vector2i(14, 1), Vector2i.RIGHT), "large-board kick begins toward distant blocker")
+		game.update_moving_bombs(1.0)
+		check(game.bombs[0].tile == Vector2i(15, 1) and game.bombs[0].kick_direction == Vector2i.ZERO and game.bombs[0].owner == 9, "large-board kicked bomb stops before wall/crate/water and keeps owner")
+	game.board[1][16] = game.OPEN
+	game.bombs = [{"tile": Vector2i(14, 1), "owner": 9, "range": 1, "time": game.FUSE}, {"tile": Vector2i(16, 1), "owner": 8, "range": 1, "time": game.FUSE}]
+	game.try_kick_bomb(Vector2i(14, 1), Vector2i.RIGHT)
+	game.update_moving_bombs(1.0)
+	check(game.bombs[0].tile == Vector2i(15, 1), "large-board kick stops before another bomb")
+	game.bombs = [{"tile": Vector2i(16, 1), "owner": 9, "range": 1, "time": game.FUSE}]
+	game.try_kick_bomb(Vector2i(16, 1), Vector2i.RIGHT)
+	game.update_moving_bombs(1.0)
+	check(game.bombs[0].tile == Vector2i(17, 1) and game.bombs[0].kick_direction == Vector2i.ZERO, "large-board kick stops at arena edge")
+
+
+func test_large_night_protection() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "night"
+	game.player_count = 10
+	game.rng.seed = 23
+	game.new_round()
+	clear_crates(game)
+	var protected := {}
+	for i in range(10):
+		var spawn: Vector2i = game.tile_at(game.players[i].pos)
+		protected[spawn] = true
+		for direction in game.DIRECTIONS:
+			var target: Vector2i = spawn + direction
+			if game.inside(target) and game.board[target.y][target.x] == game.OPEN:
+				game.move_targets[i] = game.center(target)
+				game.players[i].pos = game.center(spawn).lerp(game.center(target), 0.45)
+				protected[target] = true
+				break
+	for tile in [Vector2i(5, 5), Vector2i(7, 7), Vector2i(11, 11)]:
+		game.board[tile.y][tile.x] = game.OPEN
+		protected[tile] = true
+	game.bombs.append({"tile": Vector2i(5, 5), "owner": 9, "range": 1, "time": game.FUSE})
+	game.pickups[Vector2i(7, 7)] = game.PICKUP_VISION
+	game.flames.append({"tile": Vector2i(11, 11), "owner": 8, "distance": 1, "time": game.FLAME_TIME})
+	for minute in [60.0, 120.0]:
+		game.round_elapsed = minute
+		game.schedule_hazards(minute)
+		check(game.next_night_shuffle_at == minute + 60.0 and game.open_tiles_connected(), "large Nightfall reshuffle retains structural connectivity")
+		for tile in protected:
+			check(game.board[tile.y][tile.x] == game.OPEN, "large Nightfall protects all avatar overlaps, targets, bombs, pickups, flames")
+
+
+func test_large_hazard_progression() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	for count in range(7, 11):
+		game.player_count = count
+		for mode in game.MAP_MODES:
+			game.wall_mode = mode
+			game.rng.seed = 13
+			game.new_round()
+			game.round_elapsed = 180.0
+			game.schedule_hazards(180.0)
+			var label := "%s %d-player hazards" % [mode, count]
+			check(not game.warning_tiles().is_empty(), label + " warn at 3:00")
+			if mode == "fixed":
+				check(game.bombs[0].time == 5.0 and game.next_danger_at == 200.0, label + " strike at 3:05 with 15-second spacing")
+				game.round_elapsed = 195.0
+				game.schedule_hazards(195.0)
+				check(game.danger_waves == 2, label + " second wave progresses")
+			else:
+				check(game.hazards[0].time == 5.0 and game.next_hazard_at == 195.0, label + " strike at 3:05 with 15-second spacing")
+				game.round_elapsed = 195.0
+				game.schedule_hazards(195.0)
+				check(game.hazard_waves == 2, label + " second wave progresses")
+				if mode == "random" or mode == "frost":
+					check(game.hazards[1].tiles.size() == game.hazards[0].tiles.size() * 2, label + " escalation doubles marked tiles/rows")
+			if mode in ["pond", "night"]:
+				clear_crates(game)
+				game.hazards.clear()
+				var rings: int = (game.HEIGHT - 1) / 2
+				for ring in range(1, rings + 1):
+					game.hazard_waves = ring - 1
+					game.next_hazard_at = 180.0 + (ring - 1) * 15.0
+					game.round_elapsed = game.next_hazard_at
+					game.schedule_hazards(game.round_elapsed)
+					var hazard: Dictionary = game.hazards.pop_back()
+					check(not hazard.tiles.is_empty(), label + " closing ring exists through final center")
+					game.resolve_hazard(hazard)
+					if mode == "pond":
+						check(dry_tiles_connected(game), label + " remaining dry cells stay connected")
+				check(game.next_hazard_at + 5.0 - 15.0 == (275.0 if count < 9 else 290.0), label + " larger-board final ring time recorded")

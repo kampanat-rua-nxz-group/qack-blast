@@ -55,8 +55,9 @@ var move_targets := [Vector2.ZERO, Vector2.ZERO]
 var slide_active: Array[bool] = []
 
 
-func new_round() -> void:
-	configure_map(player_count)
+func new_round() -> bool:
+	if not configure_map(player_count):
+		return false
 	board.clear()
 	terrain.clear()
 	bombs.clear()
@@ -78,6 +79,24 @@ func new_round() -> void:
 	next_hazard_at = SUDDEN_DEATH_START
 	hazard_waves = 0
 	next_night_shuffle_at = 60.0
+	var spawns := spawn_candidates(player_count)
+	if player_count >= 7:
+		if spawns.size() > player_count:
+			spawns.remove_at(rng.randi_range(0, spawns.size() - 1))
+		for i in range(spawns.size() - 1, 0, -1):
+			var other := rng.randi_range(0, i)
+			var tile := spawns[i]
+			spawns[i] = spawns[other]
+			spawns[other] = tile
+	var escape_tiles := {}
+	if player_count >= 7:
+		for spawn in spawns:
+			escape_tiles[spawn] = true
+			for direction in DIRECTIONS:
+				for distance in [1, 2]:
+					var tile: Vector2i = spawn + direction * distance
+					if tile.x > 0 and tile.y > 0 and tile.x < WIDTH - 1 and tile.y < HEIGHT - 1:
+						escape_tiles[tile] = true
 	for y in range(HEIGHT):
 		var row: Array = []
 		var terrain_row: Array = []
@@ -93,14 +112,12 @@ func new_round() -> void:
 					pillar = (layout_x in [4, 8] and layout_y in [3, 5, 7]) or (layout_x == 6 and layout_y in [2, 8]) or (layout_y == 5 and layout_x in [2, 10])
 				"frost":
 					pillar = layout_x in [3, 6, 9] and layout_y in [2, 4, 6, 8]
-			row.append(WALL if edge or pillar else OPEN)
+			row.append(WALL if edge or (pillar and not spawns.has(Vector2i(x, y))) else OPEN)
 			terrain_row.append(0)
 		board.append(row)
 		terrain.append(terrain_row)
-	var spawns := [Vector2i(1, 1), Vector2i(WIDTH - 2, HEIGHT - 2), Vector2i(WIDTH - 2, 1), Vector2i(1, HEIGHT - 2), Vector2i(WIDTH / 2, 1), Vector2i(WIDTH / 2, HEIGHT - 2)]
-	spawns.resize(player_count)
 	if wall_mode in ["random", "night"]:
-		generate_random_walls(spawns)
+		generate_random_walls(spawns, escape_tiles)
 	for y in range(1, HEIGHT - 1):
 		for x in range(1, WIDTH - 1):
 			if board[y][x] == OPEN and rng.randf() < 0.57:
@@ -109,6 +126,9 @@ func new_round() -> void:
 		for clear_tile in [tile, tile + Vector2i.RIGHT, tile + Vector2i.LEFT, tile + Vector2i.UP, tile + Vector2i.DOWN]:
 			if inside(clear_tile) and board[clear_tile.y][clear_tile.x] != WALL:
 				board[clear_tile.y][clear_tile.x] = OPEN
+	for tile in escape_tiles:
+		if board[tile.y][tile.x] != WALL:
+			board[tile.y][tile.x] = OPEN
 	for i in range(1, spawns.size()):
 		ensure_spawn_route(spawns[0], spawns[i])
 	if wall_mode == "pond":
@@ -121,19 +141,40 @@ func new_round() -> void:
 			for x in range(1, WIDTH - 1):
 				if absi(x - WIDTH / 2) <= 3 and y % 2 == 1 and board[y][x] == OPEN:
 					terrain[y][x] = 2
+	for tile in escape_tiles:
+		terrain[tile.y][tile.x] = 0
 	players = []
 	for tile in spawns:
 		players.append({"pos": center(tile), "alive": true, "bomb_limit": 1, "range": 1, "vision": 1, "speed_bonus": 0.0, "can_kick": false, "safe_bomb": Vector2i(-1, -1), "facing": 0.0})
 
+	return true
 
-func configure_map(count: int) -> void:
-	WIDTH = 15 if count >= 4 else 13
-	HEIGHT = 13 if count >= 4 else 11
+
+func configure_map(count: int) -> bool:
+	if count < 2 or count > 10:
+		return false
+	WIDTH = 13 if count < 4 else (15 if count < 7 else (17 if count < 9 else 19))
+	HEIGHT = WIDTH - 2
 	CELL = 44.0 if count >= 4 else 52.0
 	ORIGIN = Vector2(150, 82) if count >= 4 else Vector2(142, 82)
+	return true
 
 
-func generate_random_walls(spawns: Array) -> void:
+func spawn_candidates(count: int) -> Array[Vector2i]:
+	if count < 2 or count > 10:
+		return []
+	if count >= 9:
+		return [Vector2i(1, 1), Vector2i(17, 15), Vector2i(17, 1), Vector2i(1, 15), Vector2i(9, 1), Vector2i(9, 15), Vector2i(1, 5), Vector2i(17, 11), Vector2i(17, 5), Vector2i(1, 11)]
+	if count >= 7:
+		return [Vector2i(1, 1), Vector2i(15, 13), Vector2i(15, 1), Vector2i(1, 13), Vector2i(7, 1), Vector2i(9, 13), Vector2i(1, 7), Vector2i(15, 7)]
+	var width := 15 if count >= 4 else 13
+	var height := width - 2
+	var candidates: Array[Vector2i] = [Vector2i(1, 1), Vector2i(width - 2, height - 2), Vector2i(width - 2, 1), Vector2i(1, height - 2), Vector2i(width / 2, 1), Vector2i(width / 2, height - 2)]
+	candidates.resize(count)
+	return candidates
+
+
+func generate_random_walls(spawns: Array, escape_tiles: Dictionary = {}) -> void:
 	for y in range(1, HEIGHT - 1):
 		for x in range(1, WIDTH - 1):
 			var tile := Vector2i(x, y)
@@ -142,7 +183,7 @@ func generate_random_walls(spawns: Array) -> void:
 				if absi(tile.x - spawn.x) + absi(tile.y - spawn.y) <= 1:
 					near_spawn = true
 					break
-			if near_spawn or rng.randf() >= 0.25:
+			if near_spawn or escape_tiles.has(tile) or rng.randf() >= 0.25:
 				continue
 			board[y][x] = WALL
 			if not open_tiles_connected():

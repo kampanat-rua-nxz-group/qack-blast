@@ -63,6 +63,7 @@ func _initialize() -> void:
 	check(not registry.rooms.has(code), "room and scores disappear when last peer leaves")
 	test_same_tick_bomb_blocks_press_and_held_input()
 	test_input_press_intent()
+	test_expanded_geometry_snapshot()
 	test_map_round_snapshots()
 	test_snapshot_identity_and_targets()
 	finish()
@@ -197,3 +198,18 @@ func test_snapshot_identity_and_targets() -> void:
 	var rematch: Dictionary = registry.game_view(room)
 	check(rematch.get("round_id", 0) == 2, "each rematch increments round identity")
 	check(rematch.get("snapshot_seq", 0) > second.get("snapshot_seq", 0), "sequence remains monotonic across rematches")
+
+
+func test_expanded_geometry_snapshot() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	check(registry.MAX_CONNECTED == 6, "rules expansion does not open public room capacity")
+	var created: Dictionary = registry.create_room(1, "A")
+	registry.join_room(2, created.code, "B")
+	registry.start_round(1)
+	var room: Dictionary = registry.rooms[created.code]
+	for count in range(2, 11):
+		room.game.player_count = count
+		room.game.new_round()
+		var snapshot: Dictionary = JSON.parse_string(JSON.stringify(registry.game_view(room)))
+		check(snapshot.geometry.width == room.game.WIDTH and snapshot.geometry.height == room.game.HEIGHT and snapshot.geometry.cell == room.game.CELL and snapshot.geometry.origin == [room.game.ORIGIN.x, room.game.ORIGIN.y], "snapshot carries selected %d-player authoritative geometry" % count)
+		check(snapshot.players.size() == count and snapshot.board.size() == snapshot.geometry.height and snapshot.board[0].size() == snapshot.geometry.width, "snapshot arrays match %d-player geometry" % count)
