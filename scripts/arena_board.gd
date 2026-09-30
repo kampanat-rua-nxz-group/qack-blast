@@ -1,6 +1,8 @@
 extends Node2D
 
-const COLORS = [Color("65cfc6"), Color("f58fb1"), Color("f4c66c"), Color("a995e8"), Color("7abf70"), Color("e58a5e")]
+const CharacterCatalog = preload("res://scripts/character_catalog.gd")
+const DuckArt = preload("res://scripts/duck_art.gd")
+const COLORS = CharacterCatalog.COLORS
 
 var game
 var display_state: Dictionary = {}
@@ -84,6 +86,9 @@ func _draw() -> void:
 			draw_arc(game.center(flame.tile), 17.0, 0.0, TAU, 24, Color("c18cff"), 4.0, true)
 	for i in range(game.players.size()):
 		if game.players[i].alive:
+			if networked and i == viewer_slot:
+				draw_arc(player_position(i), 23.0, 0.0, TAU, 32, Color("403d57"), 3.5, true)
+				draw_arc(player_position(i), 23.0, 0.0, TAU, 32, Color("fffdf7"), 1.5, true)
 			draw_duck(player_position(i), i, player_facing(i), player_walk_phase(i))
 	# Draw local-only spawn identification beneath the existing Nightfall mask.
 	if spawn_marker_slot >= 0 and spawn_marker_slot < game.players.size():
@@ -241,20 +246,21 @@ func draw_pickup(pos: Vector2, kind: int) -> void:
 		draw_colored_polygon(PackedVector2Array([pos + Vector2(-8, 3), pos + Vector2(0, -7), pos + Vector2(8, 3), pos + Vector2(3, 3), pos + Vector2(3, 8), pos + Vector2(-3, 8), pos + Vector2(-3, 3)]), Color("9d72c9"))
 
 
+func owner_color(owner: int) -> Color:
+	if owner < 0 or owner >= game.players.size():
+		return Color("f5a655")
+	return CharacterCatalog.appearance(game.players[owner].get("avatar_id", owner)).palette.body
+
+
 func draw_flame(pos: Vector2, owners: Array) -> void:
-	var rect := Rect2(pos - Vector2(23, 23), Vector2(46, 46))
-	if owners.size() == 1:
-		var color: Color = Color("f5a655") if owners[0] == -1 else COLORS[owners[0]]
-		rounded_box(rect, color.darkened(0.18), 16.0)
-		draw_circle(pos, 18.0, color)
-		draw_circle(pos, 10.0, color.lightened(0.45))
-	else:
-		rounded_box(rect, Color("fff2d6"), 16.0)
-		var offsets := [Vector2(-11, -10), Vector2(11, -10), Vector2(-11, 10), Vector2(11, 10), Vector2(0, -12), Vector2(0, 12), Vector2.ZERO]
-		for index in range(owners.size()):
-			var color: Color = Color("f5a655") if owners[index] == -1 else COLORS[owners[index]]
-			draw_circle(pos + offsets[index], 12.0, color)
-			draw_circle(pos + offsets[index], 5.0, color.lightened(0.45))
+	# Every ownership combination has the same lethal core. At most three accents.
+	rounded_box(Rect2(pos - Vector2(23,23),Vector2(46,46)),Color("cf763e"),16.0)
+	draw_circle(pos,19.0,Color("ffbb59"))
+	draw_circle(pos,11.0,Color("fff2c6"))
+	var offsets := [Vector2(-13,-9),Vector2(13,-9),Vector2(0,14)]
+	for index in range(mini(3,owners.size())):
+		draw_circle(pos+offsets[index],5.0,Color("403d57"))
+		draw_circle(pos+offsets[index],3.5,owner_color(owners[index]))
 
 
 func draw_bomb(pos: Vector2, fuse: float) -> void:
@@ -266,21 +272,6 @@ func draw_bomb(pos: Vector2, fuse: float) -> void:
 	draw_circle(pos + Vector2(15, -21), 4.0 if fuse > 0.6 else 5.5, Color("ffae69"))
 
 
-func draw_duck(pos: Vector2, player_index: int, angle: float = 0.0, phase: float = 0.0, canvas: CanvasItem = self) -> void:
-	var color: Color = COLORS[player_index]
-	canvas.draw_circle(pos + Vector2(0, 8), 18.0, Color("78978a55"))
-	var bounce := -absf(sin(phase)) * 2.5
-	var wing_spread := absf(sin(phase)) * 2.0
-	canvas.draw_set_transform(pos + Vector2(0, bounce), angle, Vector2.ONE)
-	canvas.draw_circle(Vector2(-13 - wing_spread, 1), 8.0, color.darkened(0.12))
-	canvas.draw_circle(Vector2(13 + wing_spread, 1), 8.0, color.darkened(0.12))
-	canvas.draw_circle(Vector2.ZERO, 17.0, color)
-	canvas.draw_circle(Vector2(-7, -5), 6.0, color.lightened(0.35))
-	canvas.draw_circle(Vector2(-5, -4), 2.5, Color("403d57"))
-	canvas.draw_circle(Vector2(6, -4), 2.5, Color("403d57"))
-	canvas.draw_colored_polygon(PackedVector2Array([Vector2(-5, 3), Vector2(5, 3), Vector2(0, 10)]), Color("ffca79"))
-	canvas.draw_circle(Vector2(-11, 4), 2.5, Color("f9a8a0"))
-	canvas.draw_circle(Vector2(11, 4), 2.5, Color("f9a8a0"))
-	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-
+func draw_duck(pos: Vector2, player_index: int, angle: float = 0.0, phase: float = 0.0, canvas: CanvasItem = self, size: float = 52.0) -> void:
+	var avatar_id: int = game.players[player_index].get("avatar_id", player_index)
+	DuckArt.draw(canvas, CharacterCatalog.appearance(avatar_id), pos, angle, phase, size)

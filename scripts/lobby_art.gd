@@ -1,5 +1,8 @@
 extends Control
 
+const CharacterCatalog = preload("res://scripts/character_catalog.gd")
+const DuckArt = preload("res://scripts/duck_art.gd")
+
 
 func _draw() -> void:
 	var font := ThemeDB.fallback_font
@@ -10,8 +13,8 @@ func _draw() -> void:
 	draw_string(font, Vector2(143, 78), "a tiny bomb battle for 2-6", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("867f91"))
 	rounded_box(Rect2(704, 30, 114, 38), Color("ffe1a6"), 19.0)
 	centered_text("ONLINE ROOM", Vector2(761, 55), 14, Color("73512d"))
-	draw_duck(Vector2(84, 320), Color("65cfc6"))
-	draw_duck(Vector2(876, 320), Color("f58fb1"))
+	DuckArt.draw(self, CharacterCatalog.appearance(0), Vector2(84, 320), 0.0, 0.0, 90.0)
+	DuckArt.draw(self, CharacterCatalog.appearance(1), Vector2(876, 320), 0.0, 0.0, 90.0)
 	rounded_box(Rect2(142, 667, 414, 30), Color("e7f2ed"), 15.0)
 	rounded_box(Rect2(574, 667, 244, 30), Color("f9e8ed"), 15.0)
 	centered_text("CREATE  •  JOIN  •  PLAY", Vector2(349, 688), 14, Color("366b68"))
@@ -29,16 +32,3 @@ func centered_text(value: String, baseline: Vector2, size: int, color: Color) ->
 	var font := ThemeDB.fallback_font
 	var width := font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	draw_string(font, baseline - Vector2(width * 0.5, 0), value, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
-
-
-func draw_duck(pos: Vector2, color: Color) -> void:
-	draw_circle(pos + Vector2(0, 8), 33.0, Color("78978a55"))
-	draw_circle(pos + Vector2(-23, 2), 15.0, color.darkened(0.12))
-	draw_circle(pos + Vector2(23, 2), 15.0, color.darkened(0.12))
-	draw_circle(pos, 31.0, color)
-	draw_circle(pos + Vector2(-12, -10), 11.0, color.lightened(0.35))
-	draw_circle(pos + Vector2(-9, -8), 4.5, Color("403d57"))
-	draw_circle(pos + Vector2(11, -8), 4.5, Color("403d57"))
-	draw_colored_polygon(PackedVector2Array([pos + Vector2(-9, 7), pos + Vector2(9, 7), pos + Vector2(0, 19)]), Color("ffca79"))
-	draw_circle(pos + Vector2(-20, 8), 4.5, Color("f9a8a0"))
-	draw_circle(pos + Vector2(20, 8), 4.5, Color("f9a8a0"))
