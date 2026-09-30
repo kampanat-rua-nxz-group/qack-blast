@@ -11,6 +11,7 @@ func _initialize() -> void:
 		return
 	Presentation = load("res://scripts/arena_presentation.gd")
 	test_interpolation_between_samples()
+	test_close_snapshot_does_not_rewind_display()
 	test_turn_uses_tile_center()
 	test_turn_facing_follows_current_segment()
 	test_reversal_uses_tile_center()
@@ -131,3 +132,22 @@ func test_reversal_uses_tile_center() -> void:
 	p.push_snapshot(snapshot(1, 1.0, Vector2(110,72), Vector2(120,72)), 10.0)
 	p.push_snapshot(snapshot(2, 1.1, Vector2(115,72), Vector2(72,72)), 10.1)
 	check(p.sample(10.1).positions[0].is_equal_approx(Vector2(117.5,72)), "reversal reaches tile center before retracing the segment")
+
+
+func test_close_snapshot_does_not_rewind_display() -> void:
+	var p = Presentation.new()
+	p.push_snapshot(snapshot(1, 1.0, Vector2(72,72), Vector2(120,72)), 10.0)
+	p.sample(10.0)
+	p.push_snapshot(snapshot(2, 1.05, Vector2(82,72), Vector2(120,72)), 10.05)
+	var before: Dictionary = p.sample(10.085)
+	check(before.positions[0].is_equal_approx(Vector2(79,72)), "regular snapshot samples expected buffered position before command broadcast")
+	p.push_snapshot(snapshot(3, 1.06, Vector2(84,72), Vector2(120,72)), 10.09)
+	var immediate: Dictionary = p.sample(10.09)
+	check(immediate.positions[0].is_equal_approx(Vector2(79,72)), "closely spaced higher sequence cannot rewind displayed position")
+	check(is_equal_approx(immediate.facing[0], -PI/2), "closely spaced broadcast preserves displayed cardinal facing")
+	check(p.sample(10.13).positions[0].is_equal_approx(Vector2(82,72)), "display resumes forward movement when buffered clock catches up")
+	check(p.sample(10.5).positions[0] == Vector2(84,72), "monotonic clock still caps display at received authority")
+	p.push_snapshot(snapshot(4, 1.5, Vector2(72,72)), 10.5)
+	check(p.sample(10.5).positions[0] == Vector2(72,72), "long gap resets monotonic cursor and displays fresh position immediately")
+	p.push_snapshot(snapshot(5, 0.0, Vector2(120,120), Vector2.ZERO, 2), 10.55)
+	check(p.sample(10.55).positions[0] == Vector2(120,120), "new round resets monotonic cursor to fresh round timing")
