@@ -8,6 +8,7 @@ const ArenaGame = preload("res://scripts/arena_game.gd")
 const ArenaScene = preload("res://scenes/arena.tscn")
 const LobbyArt = preload("res://scripts/lobby_art.gd")
 const Ui = preload("res://scripts/lobby_ui.gd")
+const MapPicker = preload("res://scripts/map_picker.gd")
 const ResultsScene = preload("res://scenes/results.tscn")
 
 var client = RoomClient.new()
@@ -25,6 +26,7 @@ var roster_label: Label
 var status_label: Label
 var start_button: Button
 var map_button: Button
+var map_picker: Control
 var leave_button: Button
 var pending_request: Dictionary = {}
 var connection_flow = ConnectionFlow.new()
@@ -67,6 +69,9 @@ func _ready() -> void:
 	results.change_map_requested.connect(_change_map)
 	results.play_again_requested.connect(func(): client.send({"type": "start"}))
 	results.leave_requested.connect(_leave_room)
+	map_picker = MapPicker.new()
+	add_child(map_picker)
+	map_picker.map_selected.connect(_select_map)
 
 
 func web_server_param() -> String:
@@ -98,7 +103,7 @@ func build_lobby() -> void:
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.custom_minimum_size.y = 72
 	Ui.spacer(status_column, 6)
-	map_button = Ui.button(status_column, "CHANGE MAP", 42, Color("e7f2ed"), Color("366b68"))
+	map_button = Ui.button(status_column, "EXPLORE MAPS", 42, Color("e7f2ed"), Color("366b68"))
 	map_button.disabled = true
 	map_button.pressed.connect(_change_map)
 	start_button = Ui.button(status_column, "START ROUND", 42, Color("ffe1a6"), Color("73512d"))
@@ -272,14 +277,17 @@ func _room_changed(room: Dictionary) -> void:
 	room_detail_label.text = "Room %s  |  %s  |  map: %s" % [room.code, room.phase, ArenaGame.MAP_NAMES[room.wall_mode]]
 	var lines: Array[String] = []
 	for person in room.people:
-		lines.append("%s%s%s" % [person.name, " (host)" if person.id == room.host else "", " (offline)" if not person.connected else ""])
+		lines.append("%s%s%s%s" % [person.name, " (YOU)" if person.id == client.person_id else "", " (host)" if person.id == room.host else "", " (offline)" if not person.connected else ""])
 	roster_label.text = "\n".join(lines)
 	var host: bool = room.host == client.person_id
 	var connected_count := 0
 	for person in room.people:
 		if person.connected:
 			connected_count += 1
-	map_button.disabled = not host or playing or countdown
+	map_button.disabled = playing or countdown
+	map_picker.present(room.wall_mode, host and not playing and not countdown)
+	if playing or countdown:
+		map_picker.hide()
 	start_button.disabled = not host or playing or countdown or connected_count < 2
 	leave_button.disabled = false
 	if room.phase == "results" and not client.game.is_empty():
@@ -406,15 +414,24 @@ func _leave_room() -> void:
 
 
 func _change_map() -> void:
-	var modes: Array = ArenaGame.MAP_MODES
-	var mode: String = modes[(modes.find(client.room.wall_mode) + 1) % modes.size()]
-	client.send({"type": "map", "mode": mode})
+	if client.room.is_empty() or client.room.phase not in ["lobby", "results"]:
+		return
+	map_picker.present(client.room.wall_mode, client.room.host == client.person_id)
+	map_picker.inspect(client.room.wall_mode)
+	map_picker.show()
+
+
+func _select_map(mode: String) -> void:
+	if not client.room.is_empty() and client.room.host == client.person_id and client.room.phase in ["lobby", "results"]:
+		client.send({"type": "map", "mode": mode})
 
 
 func _show_error(message: String) -> void:
 	if connection_flow.phase == "failed":
 		return
 	pending_request = {}
+	if map_picker.visible:
+		map_picker.show_error(message)
 	if results.visible:
 		results.show_error(message)
 	else:
@@ -422,6 +439,7 @@ func _show_error(message: String) -> void:
 
 
 func _left_room() -> void:
+	map_picker.hide()
 	presentation.reset()
 	go_remaining = 0.0
 	arena_round_id = -1

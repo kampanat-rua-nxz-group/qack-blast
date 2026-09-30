@@ -47,7 +47,7 @@ func run_checks(results) -> void:
 	check(results.find_child("Status", true, false).text.contains("copied"), "copy code confirms action")
 	results.present(room, {"round_over": true, "result": "DRAW"}, 2)
 	check(results.find_child("Outcome", true, false).text.contains("DRAW"), "results show draw")
-	check(results.find_child("ChangeMapButton", true, false).disabled and results.find_child("PlayAgainButton", true, false).disabled, "guest cannot use host controls")
+	check(not results.find_child("ChangeMapButton", true, false).disabled and results.find_child("PlayAgainButton", true, false).disabled, "guest can inspect maps but cannot replay")
 	room.host = 2
 	results.present(room, {"round_over": true, "result": "PLAYER 2 WINS"}, 2)
 	check(results.find_child("Outcome", true, false).text.contains("PLAYER 2 WINS") and not results.find_child("PlayAgainButton", true, false).disabled, "host transfer updates controls and winner")
@@ -58,7 +58,18 @@ func run_checks(results) -> void:
 	room.people.append({"id": 8, "name": "New Duck", "connected": true, "wins": 0, "kills": 0})
 	results.present(room, {"round_over": true, "result": "DRAW"}, 2)
 	check(rows.get_child_count() == 8 and not results.find_child("PlayAgainButton", true, false).disabled, "late join updates leaderboard and replay availability")
+	test_long_winner_remains_readable(results, room)
 	finish()
+
+
+func test_long_winner_remains_readable(results, room: Dictionary) -> void:
+	var long_room := room.duplicate(true)
+	long_room.people[0].name = "ExtraLongHostDuck"
+	long_room.people[0].slot = 0
+	results.present(long_room, {"round_over": true, "result": "PLAYER 1 WINS"}, 2)
+	var label: Label = results.outcome_label
+	var size: int = label.get_theme_font_size("font_size")
+	check(size >= 18 and label.get_theme_font("font").get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= 268.0, "long winner name fits without splitting nickname")
 
 
 func check(condition: bool, message: String) -> void:

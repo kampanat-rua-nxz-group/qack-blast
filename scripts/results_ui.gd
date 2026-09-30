@@ -80,7 +80,7 @@ func _ready() -> void:
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 10)
 	column.add_child(actions)
-	map_button = Ui.button(actions, "CHANGE MAP", 40, Color("e7f2ed"), Color("366b68"))
+	map_button = Ui.button(actions, "EXPLORE MAPS", 40, Color("e7f2ed"), Color("366b68"))
 	map_button.name = "ChangeMapButton"
 	map_button.pressed.connect(func(): change_map_requested.emit())
 	replay_button = Ui.button(actions, "PLAY AGAIN", 40, Color("ffe1a6"), Color("73512d"))
@@ -99,6 +99,10 @@ func present(room: Dictionary, game: Dictionary, person_id: int) -> void:
 	map_label.text = "MAP: %s" % ArenaGame.MAP_NAMES.get(room.get("wall_mode", "fixed"), "Classic")
 	var people: Array = room.get("people", [])
 	outcome_label.text = _outcome_text(game, people)
+	var outcome_size := 32
+	while outcome_label.get_theme_font("font").get_string_size(outcome_label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, outcome_size).x > 268.0 and outcome_size > 18:
+		outcome_size -= 1
+	outcome_label.add_theme_font_size_override("font_size", outcome_size)
 	var connected_count := 0
 	for person in people:
 		if person.connected:
@@ -108,7 +112,7 @@ func present(room: Dictionary, game: Dictionary, person_id: int) -> void:
 		displayed_people = people.duplicate(true)
 		displayed_host = room.host
 	var host: bool = room.host == person_id
-	map_button.disabled = not host
+	map_button.disabled = room.get("phase", "results") not in ["lobby", "results"]
 	replay_button.disabled = not host or connected_count < 2
 	status_label.text = feedback if not feedback.is_empty() else "Choose a map or play again." if host else "Waiting for the host to start the next round."
 
@@ -176,6 +180,9 @@ func _add_score_cells(row: HBoxContainer, rank: String, name: String, wins: Stri
 	rank_label.custom_minimum_size.x = 48
 	var name_label := _text(row, name, "Name", 15, Ui.NAVY)
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.clip_text = true
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	name_label.tooltip_text = name
 	var wins_label := _text(row, wins, "Wins", 15, Ui.NAVY)
 	wins_label.custom_minimum_size.x = 54
 	var kills_label := _text(row, kills, "Kills", 15, Ui.NAVY)

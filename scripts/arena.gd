@@ -111,14 +111,14 @@ func _draw() -> void:
 	centered_text("%s  %d:%02d" % [ArenaGame.MAP_NAMES[game.wall_mode].to_upper(), int(game.round_elapsed) / 60, int(game.round_elapsed) % 60], Vector2(635, 49), 13, Color("73512d"))
 	if game.round_elapsed >= game.SUDDEN_DEATH_START and not game.round_over:
 		centered_text("SUDDEN DEATH", Vector2(635, 68), 11, Color("c35162"))
-	if selected_wall_mode != game.wall_mode:
+	if shows_next_map():
 		centered_text("NEXT: %s" % ArenaGame.MAP_NAMES[selected_wall_mode].to_upper(), Vector2(500, 49), 12, Color("92536b"))
 	for i in range(game.players.size()):
 		draw_player_card(i)
 	rounded_box(Rect2(142, 667, 259, 29), Color("e7f2ed"), 14.0)
 	rounded_box(Rect2(416, 667, 402, 29), Color("f9e8ed"), 14.0)
 	centered_text("WASD / ARROWS + SPACE / ENTER" if networked else "P1  WASD  +  SPACE", Vector2(271, 687), 12 if networked else 14, Color("366b68"))
-	centered_text("ROOM HOST STARTS NEXT ROUND" if networked else "P2 ARROWS + ENTER  |  M NEXT MAP  R START", Vector2(617, 687), 12, Color("92536b"))
+	centered_text((spectator_text() if viewer_slot < 0 else "ROOM HOST STARTS NEXT ROUND") if networked else "P2 ARROWS + ENTER  |  M NEXT MAP  R START", Vector2(617, 687), 12, Color("92536b"))
 	if networked and not countdown_text.is_empty():
 		draw_rect(BOARD_REGION, Color("44395488"))
 		rounded_box(Rect2(350, 246, 260, 188), Color("fffaf0"), 25.0)
@@ -152,6 +152,18 @@ func centered_text(value: String, baseline: Vector2, size: int, color: Color) ->
 	var font := ThemeDB.fallback_font
 	var width := font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	draw_string(font, baseline - Vector2(width * 0.5, 0), value, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+
+
+func shows_next_map() -> bool:
+	return not networked and selected_wall_mode != game.wall_mode
+
+
+func player_marker(i: int) -> String:
+	return "YOU" if networked and viewer_slot >= 0 and i == viewer_slot else ""
+
+
+func spectator_text() -> String:
+	return "SPECTATING — next round" if networked and viewer_slot < 0 else ""
 
 
 func player_label(i: int) -> String:
@@ -192,6 +204,7 @@ func _sync_board_view() -> void:
 	board.walk_phase = walk_phase
 	board.game = game
 	board.viewer_slot = viewer_slot
+	board.spawn_marker_slot = viewer_slot if networked and viewer_slot >= 0 and viewer_slot < game.players.size() and game.players[viewer_slot].alive and not game.round_over and game.round_elapsed < 2.5 else -1
 
 
 func present_board(display_state: Dictionary = {}) -> void:
@@ -226,7 +239,7 @@ func draw_player_card(i: int) -> void:
 	while ThemeDB.fallback_font.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1, name_size).x > 108.0 and name_size > 9:
 		name_size -= 1
 	centered_text(name, Vector2(x + 60, y + (84 if compact else 101)), name_size, Color("403d57"))
-	centered_text("READY!" if game.players[i].alive else "OUT!", Vector2(x + 60, y + (105 if compact else 122)), 13, Color("5f9b80") if game.players[i].alive else Color("c77c83"))
+	centered_text(("YOU · " if not player_marker(i).is_empty() else "") + ("READY!" if game.players[i].alive else "OUT!"), Vector2(x + 60, y + (105 if compact else 122)), 13, Color("5f9b80") if game.players[i].alive else Color("c77c83"))
 	centered_text("BOMB %d   FIRE %d" % [game.players[i].bomb_limit, game.players[i].range], Vector2(x + 60, y + (130 if compact else 149)), 12, Color("827b8b"))
 	if game.wall_mode == "night":
 		centered_text("SIGHT %d" % game.players[i].vision, Vector2(x + 60, y + (148 if compact else 166)), 12, Color("827b8b"))

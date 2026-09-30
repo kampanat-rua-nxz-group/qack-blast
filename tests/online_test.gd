@@ -29,6 +29,10 @@ func run_checks(app) -> void:
 	test_snapshot_geometry_round_trip(app)
 	test_authoritative_display_separation(app)
 	test_connection_ui(app)
+	test_online_hides_local_next_map(app)
+	test_local_player_marker_follows_person_slot(app)
+	test_spectator_has_no_player_marker(app)
+	test_shared_map_picker(app)
 	var registry = RoomRegistry.new()
 	var result: Dictionary = registry.create_room(10, "Duck")
 	app.client.accept({"type": "joined", "person_id": result.person_id})
@@ -272,3 +276,95 @@ func test_game_arrives_before_room(app) -> void:
 	app.client.accept(registry.room_view(room))
 	check(app.arena.visible and app.arena.game.wall_mode == "pond" and app.arena.countdown_text == "3", "room arriving after game applies matching prepared arena before displaying it")
 	app.client.accept({"type": "left"})
+
+
+func test_online_hides_local_next_map(app) -> void:
+	check(app.arena.has_method("shows_next_map"), "online exposes next-map visibility")
+	if not app.arena.has_method("shows_next_map"):
+		return
+	app.arena.selected_wall_mode = "pond"
+	app.arena.game.wall_mode = "fixed"
+	check(not app.arena.shows_next_map(), "online hides local NEXT map")
+	app.arena.networked = false
+	check(app.arena.shows_next_map(), "local retains M/R next map indication")
+	app.arena.networked = true
+
+
+func test_local_player_marker_follows_person_slot(app) -> void:
+	check(app.arena.has_method("player_marker"), "arena provides local identity marker")
+	if not app.arena.has_method("player_marker"):
+		return
+	var registry = RoomRegistry.new()
+	var created: Dictionary = registry.create_room(1, "Host")
+	var joined: Dictionary = registry.join_room(2, created.code, "Guest")
+	registry.start_round(1)
+	app.client.accept({"type": "joined", "person_id": joined.person_id})
+	app.client.accept(registry.room_view(registry.room_for_peer(1)))
+	app.client.accept(registry.game_view(registry.room_for_peer(1)))
+	check(app.arena.player_marker(0).is_empty() and app.arena.player_marker(1) == "YOU", "YOU follows local person slot rather than host slot")
+	check(app.arena.board.get("spawn_marker_slot") == 1, "spawn indicator follows local duck")
+	registry.tick(3.0)
+	registry.room_for_peer(1).game.round_elapsed = 3.0
+	app.client.accept(registry.room_view(registry.room_for_peer(1)))
+	app.client.accept(registry.game_view(registry.room_for_peer(1)))
+	check(app.arena.board.get("spawn_marker_slot") == -1, "spawn indicator expires while card identity persists")
+	check(app.arena.player_marker(1) == "YOU", "local card remains identified after spawn")
+	app.client.accept({"type": "left"})
+
+
+func test_spectator_has_no_player_marker(app) -> void:
+	if not app.arena.has_method("player_marker"):
+		check(false, "spectator identity presentation exists")
+		return
+	var registry = RoomRegistry.new()
+	var created: Dictionary = registry.create_room(1, "Host")
+	registry.join_room(2, created.code, "Guest")
+	registry.start_round(1)
+	var late: Dictionary = registry.join_room(3, created.code, "Late")
+	app.client.accept({"type": "joined", "person_id": late.person_id})
+	app.client.accept(registry.room_view(registry.room_for_peer(1)))
+	app.client.accept(registry.game_view(registry.room_for_peer(1)))
+	check(app.arena.viewer_slot == -1 and app.arena.player_marker(0).is_empty() and app.arena.player_marker(1).is_empty(), "spectator has no marker on another duck")
+	check(app.arena.spectator_text() == "SPECTATING — next round" and app.arena.board.spawn_marker_slot == -1, "spectator sees next-round label without spawn marker")
+	app.client.accept({"type": "left"})
+
+
+func test_shared_map_picker(app) -> void:
+	check(app.get("map_picker") != null, "online owns shared lobby/results picker")
+	if app.get("map_picker") == null:
+		return
+	var registry = RoomRegistry.new()
+	var created: Dictionary = registry.create_room(1, "Host")
+	var guest: Dictionary = registry.join_room(2, created.code, "Guest")
+	app.client.accept({"type": "joined", "person_id": guest.person_id})
+	app.client.accept(registry.room_view(registry.room_for_peer(1)))
+	check(not app.map_button.disabled, "guest can open waiting map descriptions")
+	app.map_button.pressed.emit()
+	check(app.map_picker.visible and not app.map_picker.can_select, "guest waiting picker only inspects")
+	app.map_picker.inspect("frost")
+	check(app.map_picker.selected_mode == "fixed", "guest inspection preserves authoritative map")
+	app.client.person_id = created.person_id
+	app._room_changed(app.client.room)
+	app.map_picker.inspect("night")
+	app.map_picker.select_button.pressed.emit()
+	check(app.map_picker.selected_mode == "fixed", "map request does not optimistically select")
+	app._show_error("Map rejected")
+	check(app.map_picker.selected_mode == "fixed", "rejection leaves selected map authoritative")
+	check(app.map_picker.permission_label.text.contains("Map rejected"), "map rejection stays visible inside open picker")
+	registry.choose_map(1, "pond")
+	app.client.accept(registry.room_view(registry.room_for_peer(1)))
+	check(app.map_picker.selected_mode == "pond", "room update changes selected indicator")
+	registry.start_round(1)
+	app.client.accept(registry.room_view(registry.room_for_peer(1)))
+	check(not app.map_picker.visible and not app.map_picker.can_select, "countdown closes and locks picker")
+	registry.tick(3.0)
+	var room: Dictionary = registry.room_for_peer(1)
+	room.game.players[0].alive = false
+	room.game.resolve_round()
+	registry.tick(0.0)
+	app.client.accept(registry.room_view(room))
+	app.client.accept(registry.game_view(room))
+	app.results.map_button.pressed.emit()
+	check(app.map_picker.visible and app.map_picker.selected_mode == "pond" and app.map_picker.can_select, "results opens same authoritative host picker")
+	app.client.accept({"type": "left"})
+	check(not app.map_picker.visible, "leaving closes picker")
