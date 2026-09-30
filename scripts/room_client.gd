@@ -6,6 +6,7 @@ signal transport_connected
 signal room_changed(room: Dictionary)
 signal game_changed(game: Dictionary)
 signal error_received(message: String)
+signal events_received(round_id: int, events: Array)
 signal left_room
 signal transport_disconnected
 
@@ -19,6 +20,12 @@ var room: Dictionary = {}
 var game: Dictionary = {}
 
 const DEFAULT_SERVER_URL = "ws://127.0.0.1:9080"
+const MAX_PENDING_EVENT_MESSAGES = 8
+
+var pending_events: Array = []
+var event_round := -1
+var event_cursor := 0
+var events_synced := false
 
 
 static func resolve_server_url(args: PackedStringArray, web_value: String, public_url: String = "") -> String:
@@ -54,6 +61,7 @@ func close_transport(generation: int) -> void:
 	person_id = 0
 	room = {}
 	game = {}
+	reset_events()
 
 
 func _process(_delta: float) -> void:
@@ -75,6 +83,7 @@ func _process(_delta: float) -> void:
 		person_id = 0
 		room = {}
 		game = {}
+		reset_events()
 		transport_disconnected.emit()
 		transport_result.emit(generation, false)
 	elif status == MultiplayerPeer.CONNECTION_DISCONNECTED and connecting:
@@ -106,14 +115,68 @@ func accept(message: Dictionary, generation: int = -1) -> void:
 			if not game.is_empty() and (next_round < int(game.round_id) or (next_round == int(game.round_id) and int(message.snapshot_seq) <= int(game.snapshot_seq))):
 				return
 			game = message
+			sync_event_round(game)
 			game_changed.emit(game)
+			flush_pending_events()
+		"events":
+			accept_events(message)
 		"left":
 			person_id = 0
 			room = {}
 			game = {}
+			reset_events()
 			left_room.emit()
 		"error":
 			error_received.emit(str(message.get("message", "Server error")))
+
+
+func reset_events() -> void:
+	pending_events.clear()
+	event_round = -1
+	event_cursor = 0
+	events_synced = false
+
+
+func sync_event_round(snapshot: Dictionary) -> void:
+	var round_id := int(snapshot.round_id)
+	if round_id == event_round:
+		return
+	event_round = round_id
+	# First state after joining or reconnecting starts at the server cursor; later rounds start fresh.
+	event_cursor = 0 if events_synced else int(snapshot.get("event_cursor", 0))
+	events_synced = true
+
+
+func accept_events(message: Dictionary) -> void:
+	var round_id := int(message.get("round_id", -1))
+	if game.is_empty() or round_id > int(game.round_id):
+		pending_events.append(message)
+		while pending_events.size() > MAX_PENDING_EVENT_MESSAGES:
+			pending_events.pop_front()
+	elif round_id == int(game.round_id):
+		deliver_events(round_id, message.get("events", []))
+
+
+func flush_pending_events() -> void:
+	var waiting := pending_events
+	pending_events = []
+	for message in waiting:
+		var round_id := int(message.get("round_id", -1))
+		if round_id > int(game.round_id):
+			pending_events.append(message)
+		elif round_id == int(game.round_id):
+			deliver_events(round_id, message.get("events", []))
+
+
+func deliver_events(round_id: int, events: Array) -> void:
+	var fresh: Array = []
+	for event in events:
+		var event_id := int(event.get("event_id", 0))
+		if event_id > event_cursor:
+			event_cursor = event_id
+			fresh.append(event)
+	if not fresh.is_empty():
+		events_received.emit(round_id, fresh)
 
 
 func send(message: Dictionary) -> void:

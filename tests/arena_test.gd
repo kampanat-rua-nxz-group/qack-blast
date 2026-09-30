@@ -67,6 +67,13 @@ func _initialize() -> void:
 	test_danger_bomb_waves()
 	test_danger_bomb_crosses_walls()
 	test_danger_bomb_waits_through_chain()
+	test_event_placement_and_explosion_once()
+	test_event_chain_explosions_once()
+	test_event_pickup_grants_and_caps()
+	test_event_elimination_causes()
+	test_event_hazard_and_disconnect_causes()
+	test_event_round_end_once()
+	test_event_ids_reset_and_bounded()
 	print("Arena checks: %d failure(s)" % failures)
 	quit(1 if failures else 0)
 
@@ -1367,3 +1374,160 @@ func test_large_hazard_progression() -> void:
 					if mode == "pond":
 						check(dry_tiles_connected(game), label + " remaining dry cells stay connected")
 				check(game.next_hazard_at + 5.0 - 15.0 == (275.0 if count < 9 else 290.0), label + " larger-board final ring time recorded")
+
+
+func events_of(events: Array, kind: String) -> Array:
+	return events.filter(func(event): return event.kind == kind)
+
+
+func event_game():
+	var game = load("res://scripts/arena_game.gd").new()
+	game.new_round()
+	clear_crates(game)
+	game.take_events()
+	return game
+
+
+func idle(game, count: int = 1) -> void:
+	for i in range(count):
+		game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [false, false])
+
+
+func test_event_placement_and_explosion_once() -> void:
+	var game = event_game()
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [true, false])
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [true, false])
+	var events: Array = game.take_events()
+	var placed := events_of(events, "bomb_placed")
+	check(placed.size() == 1 and placed[0].owner == 0 and placed[0].tile == [1, 1], "placement emits exactly one event with owner and JSON tile")
+	check(placed[0].event_id == 1 and placed[0].has("elapsed"), "event carries id and elapsed")
+	check(game.take_events().is_empty(), "take_events drains the batch")
+	game.players[0].pos = game.center(Vector2i(5, 5))
+	game.step(2.6, [Vector2.ZERO, Vector2.ZERO], [false, false])
+	events = game.take_events()
+	var exploded := events_of(events, "bomb_exploded")
+	check(exploded.size() == 1 and exploded[0].tile == [1, 1] and exploded[0].owner == 0, "explosion emits exactly one event")
+	idle(game, 3)
+	check(events_of(game.take_events(), "bomb_exploded").is_empty(), "explosion is not re-emitted")
+
+
+func test_event_chain_explosions_once() -> void:
+	var game = event_game()
+	game.players[0].pos = game.center(Vector2i(9, 5))
+	game.bombs = [
+		{"tile": Vector2i(3, 3), "owner": 0, "range": 2, "time": 0.0},
+		{"tile": Vector2i(5, 3), "owner": 1, "range": 1, "time": game.FUSE},
+	]
+	idle(game)
+	var events: Array = game.take_events()
+	var exploded := events_of(events, "bomb_exploded")
+	check(exploded.size() == 2, "chain emits one explosion per bomb")
+	var ids: Array = events.map(func(event): return event.event_id)
+	var sorted_ids := ids.duplicate()
+	sorted_ids.sort()
+	check(ids == sorted_ids and ids[0] == 1 and ids[-1] == ids.size(), "event ids are consecutive and ordered")
+
+
+func test_event_pickup_grants_and_caps() -> void:
+	var game = event_game()
+	var tile: Vector2i = game.tile_at(game.players[0].pos)
+	game.pickups[tile] = game.PICKUP_BOMB_CAPACITY
+	idle(game)
+	var picked := events_of(game.take_events(), "pickup_collected")
+	check(picked.size() == 1 and picked[0].player == 0 and picked[0].pickup == game.PICKUP_BOMB_CAPACITY and picked[0].granted == true and picked[0].tile == [tile.x, tile.y], "actual pickup grant emits one event")
+	game.players[0].bomb_limit = 5
+	game.pickups[tile] = game.PICKUP_BOMB_CAPACITY
+	idle(game)
+	picked = events_of(game.take_events(), "pickup_collected")
+	check(picked.size() == 1 and picked[0].granted == false, "capped pickup emits event marked not granted")
+	game.players[0].bomb_limit = 5
+	game.players[0].range = 6
+	game.pickups[tile] = game.PICKUP_MYSTERY
+	idle(game)
+	picked = events_of(game.take_events(), "pickup_collected")
+	check(picked.size() == 1 and picked[0].granted == false, "capped mystery emits no-change event")
+	idle(game, 2)
+	check(events_of(game.take_events(), "pickup_collected").is_empty(), "collected pickup is not re-emitted")
+
+
+func eliminated(events: Array, index: int) -> Array:
+	return events_of(events, "player_eliminated").filter(func(event): return event.player == index)
+
+
+func test_event_elimination_causes() -> void:
+	var game = event_game()
+	game.players[1].pos = game.center(Vector2i(11, 9))
+	game.bombs = [{"tile": Vector2i(1, 1), "owner": 0, "range": 1, "time": 0.0}]
+	idle(game)
+	var events: Array = game.take_events()
+	var out := eliminated(events, 0)
+	check(out.size() == 1 and out[0].cause.kind == "own_bomb" and out[0].cause.owner == 0, "own bomb cause recorded once")
+	check(game.players[0].elimination_cause.kind == "own_bomb" and game.scores[0].kills == 0 and game.scores[1].wins == 1, "own cause persists in player state, scores unchanged")
+	game = event_game()
+	game.players[0].pos = game.center(Vector2i(5, 3))
+	game.bombs = [{"tile": Vector2i(2, 3), "owner": 0, "range": 3, "time": 0.0}, {"tile": Vector2i(7, 3), "owner": 1, "range": 2, "time": 0.0}]
+	idle(game)
+	out = eliminated(game.take_events(), 0)
+	check(out.size() == 1 and out[0].cause.kind == "other_bomb" and out[0].cause.owner == 1 and game.scores[1].kills == 1, "nearest blast owner credited as other bomb cause")
+	game = event_game()
+	game.players[0].pos = game.center(Vector2i(5, 3))
+	game.bombs = [{"tile": Vector2i(7, 3), "owner": 1, "range": 2, "time": 0.0}, {"tile": Vector2i(3, 3), "owner": 0, "range": 2, "time": 0.0}]
+	idle(game)
+	out = eliminated(game.take_events(), 0)
+	check(out.size() == 1 and out[0].cause.kind == "ambiguous_blasts" and out[0].cause.owner == -1 and game.scores[0].kills == 0 and game.scores[1].kills == 0, "equal-distance blasts are ambiguous with no credited killer")
+	game = event_game()
+	game.bombs = [{"tile": Vector2i(5, 1), "owner": -1, "range": 0, "time": 0.0, "danger": true}]
+	idle(game)
+	out = eliminated(game.take_events(), 0)
+	check(out.size() == 1 and out[0].cause.kind == "danger_bomb" and out[0].cause.owner == -1 and game.scores[1].kills == 0, "neutral danger bomb cause")
+
+
+func hazard_cause(kind: String) -> String:
+	var game = event_game()
+	game.hazards.append({"kind": kind, "tiles": [Vector2i(1, 1)], "time": 0.01})
+	idle(game)
+	var out := eliminated(game.take_events(), 0)
+	check(out.size() == 1 and game.players[0].elimination_cause.kind == out[0].cause.kind and game.scores[1].kills == 0 and game.scores[1].wins == 1, "%s eliminates once, no Kill, survivor Win" % kind)
+	return out[0].cause.kind if out.size() == 1 else ""
+
+
+func test_event_hazard_and_disconnect_causes() -> void:
+	for kind in ["flood", "blizzard", "random_burst", "closing_walls"]:
+		check(hazard_cause(kind) == kind, "%s cause recorded" % kind)
+	var game = event_game()
+	check(game.has_method("eliminate_disconnected"), "engine exposes disconnect elimination")
+	if not game.has_method("eliminate_disconnected"):
+		return
+	game.eliminate_disconnected(0)
+	game.eliminate_disconnected(0)
+	idle(game)
+	var events: Array = game.take_events()
+	var out := eliminated(events, 0)
+	check(out.size() == 1 and out[0].cause.kind == "disconnect" and game.players[0].elimination_cause.kind == "disconnect" and game.scores[1].kills == 0, "disconnect expiry recorded once with no Kill")
+
+
+func test_event_round_end_once() -> void:
+	var game = event_game()
+	game.flames.append({"tile": Vector2i(11, 9), "owner": 0, "distance": 1, "time": game.FLAME_TIME})
+	idle(game, 3)
+	var ended := events_of(game.take_events(), "round_ended")
+	check(ended.size() == 1 and ended[0].result == "PLAYER 1 WINS" and ended[0].winner == 0, "round end emitted once with winner")
+	game = event_game()
+	game.flames.append({"tile": Vector2i(1, 1), "owner": -1, "distance": 1, "time": game.FLAME_TIME})
+	game.flames.append({"tile": Vector2i(11, 9), "owner": -1, "distance": 1, "time": game.FLAME_TIME})
+	idle(game, 3)
+	ended = events_of(game.take_events(), "round_ended")
+	check(ended.size() == 1 and ended[0].result == "DRAW" and ended[0].winner == -1, "draw round end emitted once")
+
+
+func test_event_ids_reset_and_bounded() -> void:
+	var game = event_game()
+	game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [true, false])
+	check(game.event_counter == 1, "counter counts emitted events")
+	game.new_round()
+	check(game.event_counter == 0 and game.take_events().is_empty(), "new round resets counter and pending events")
+	game.event_counter = 0
+	for i in range(game.MAX_PENDING_EVENTS + 50):
+		game.emit_event("bomb_placed", {"tile": [1, 1], "owner": 0})
+	var events: Array = game.take_events()
+	check(events.size() == game.MAX_PENDING_EVENTS and events[-1].event_id == game.MAX_PENDING_EVENTS + 50 and events[0].event_id == 51, "pending events are bounded keeping newest ids")

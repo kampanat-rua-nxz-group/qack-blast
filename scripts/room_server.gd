@@ -23,6 +23,8 @@ func poll(delta: float) -> void:
 		else:
 			send_to(peer_id, {"type": "error", "message": "Invalid message"})
 	registry.tick(delta)
+	for room in registry.rooms.values():
+		push_room_events(room)
 	snapshot_clock += delta
 	if snapshot_clock >= 0.05:
 		snapshot_clock = 0.0
@@ -76,6 +78,16 @@ func push_state(peer_id: int) -> void:
 	send_to(peer_id, registry.room_view(room))
 	if room.game != null:
 		send_to(peer_id, registry.game_view(room))
+
+
+func push_room_events(room: Dictionary) -> void:
+	var events: Array = registry.take_room_events(room)
+	if events.is_empty():
+		return
+	var message := {"type": "events", "round_id": room.round_id, "events": events}
+	for person in room.people:
+		if person.peer != 0:
+			send_to(person.peer, message)
 
 
 func push_room_state(room: Dictionary) -> void:

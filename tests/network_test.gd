@@ -16,6 +16,7 @@ var frozen_positions: Array = []
 
 func _initialize() -> void:
 	test_input_commands()
+	test_client_event_handling()
 	if failures:
 		quit(1)
 		return
@@ -88,6 +89,14 @@ func _process(delta: float) -> bool:
 		4:
 			for message in inbox[1]:
 				if message.get("type") == "game" and message.bombs.size() == 1 and message.bombs[0].owner == 1:
+					for inbox_index in range(2):
+						var placed := 0
+						for event_message in inbox[inbox_index]:
+							if event_message.get("type") == "events" and int(event_message.round_id) == 1:
+								for event in event_message.events:
+									if event.kind == "bomb_placed" and int(event.owner) == 1:
+										placed += 1
+						check(placed == 1, "client %d receives the placement event exactly once over WebSocket" % inbox_index)
 					var room = server.registry.rooms[room_code]
 					if room.game.players[1].pos.x >= room.game.center(Vector2i(11, 9)).x:
 						fail("WebSocket short press survives release before next server tick")
@@ -176,3 +185,37 @@ func fail(message: String) -> void:
 	for client in clients:
 		client.close()
 	quit(1)
+
+
+func test_client_event_handling() -> void:
+	var received: Array = []
+	var client = load("res://scripts/room_client.gd").new()
+	client.events_received.connect(func(round_id, events): received.append([round_id, events.map(func(event): return event.event_id)]))
+	var game := {"type": "game", "round_id": 1, "snapshot_seq": 1, "event_cursor": 0}
+	client.accept({"type": "events", "round_id": 1, "events": [{"event_id": 1, "kind": "bomb_placed"}]})
+	check(received.is_empty(), "events before matching game state are queued")
+	client.accept(game)
+	check(received == [[1, [1]]], "queued events flush once the round state arrives")
+	client.accept({"type": "events", "round_id": 1, "events": [{"event_id": 1, "kind": "bomb_placed"}, {"event_id": 2, "kind": "bomb_exploded"}]})
+	check(received == [[1, [1]], [1, [2]]], "duplicate (round, event) ids are dropped")
+	client.accept({"type": "events", "round_id": 1, "events": [{"event_id": 2, "kind": "bomb_exploded"}]})
+	check(received.size() == 2, "fully duplicate batch emits nothing")
+	client.accept({"type": "events", "round_id": 2, "events": [{"event_id": 1, "kind": "bomb_placed"}]})
+	check(received.size() == 2, "next-round events wait for matching state")
+	client.accept({"type": "game", "round_id": 2, "snapshot_seq": 1, "event_cursor": 0})
+	check(received.size() == 3 and received[2] == [2, [1]], "round boundary flushes queue and resets id space")
+	client.accept({"type": "events", "round_id": 1, "events": [{"event_id": 9, "kind": "bomb_placed"}]})
+	check(received.size() == 3, "stale-round events are ignored")
+	for i in range(30):
+		client.accept({"type": "events", "round_id": 5, "events": [{"event_id": i + 1, "kind": "bomb_placed"}]})
+	check(client.pending_events.size() <= client.MAX_PENDING_EVENT_MESSAGES, "pending event queue is bounded")
+	client.accept({"type": "left"})
+	check(client.pending_events.is_empty(), "queue clears when leaving the room")
+	received.clear()
+	var late = load("res://scripts/room_client.gd").new()
+	late.events_received.connect(func(round_id, events): received.append([round_id, events.map(func(event): return event.event_id)]))
+	late.accept({"type": "game", "round_id": 3, "snapshot_seq": 40, "event_cursor": 5})
+	late.accept({"type": "events", "round_id": 3, "events": [{"event_id": 4, "kind": "bomb_exploded"}, {"event_id": 5, "kind": "player_eliminated"}, {"event_id": 6, "kind": "round_ended"}]})
+	check(received == [[3, [6]]], "late join starts at the snapshot cursor without replaying history")
+	client.free()
+	late.free()
