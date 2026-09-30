@@ -100,6 +100,11 @@ func accept(message: Dictionary, generation: int = -1) -> void:
 			room = message
 			room_changed.emit(room)
 		"game":
+			var next_round := int(message.round_id)
+			if next_round < int(room.get("round_id", -1)):
+				return
+			if not game.is_empty() and (next_round < int(game.round_id) or (next_round == int(game.round_id) and int(message.snapshot_seq) <= int(game.snapshot_seq))):
+				return
 			game = message
 			game_changed.emit(game)
 		"left":

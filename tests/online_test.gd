@@ -26,6 +26,7 @@ func run_checks(app) -> void:
 	check(RoomClient.resolve_server_url(PackedStringArray(["--server=ws://a"]), " wss://b ") == "wss://b", "web server parameter wins")
 	check(app.lobby.find_children("*", "LineEdit", true, false).size() == 2, "entry screen hides server URL")
 	test_snapshot_geometry_round_trip(app)
+	test_authoritative_display_separation(app)
 	test_connection_ui(app)
 	var registry = RoomRegistry.new()
 	var result: Dictionary = registry.create_room(10, "Duck")
@@ -184,3 +185,44 @@ func test_snapshot_geometry_round_trip(app) -> void:
 		check((board.transform * app.arena.game.players[0].pos).is_equal_approx(Vector2(216, 148)), "snapshot duck uses same world-to-display transform as board")
 		board.fit_to(Rect2(142, 82, 676, 572), 22.0)
 		check(app.arena.game.tile_at(app.arena.game.players[0].pos) == Vector2i(1, 1), "online display scaling preserves snapshot rule coordinates")
+	app.client.accept({"type": "left"})
+
+
+func test_authoritative_display_separation(app) -> void:
+	check(app.get("presentation") != null, "online app owns authoritative presentation")
+	if app.get("presentation") == null:
+		return
+	var registry = RoomRegistry.new()
+	var created: Dictionary = registry.create_room(1, "A")
+	registry.join_room(2, created.code, "B")
+	registry.choose_map(1, "night")
+	registry.start_round(1)
+	var room: Dictionary = registry.rooms[created.code]
+	room.game.board[1][2] = 0
+	app.client.accept({"type": "joined", "person_id": created.person_id})
+	app.client.accept(registry.room_view(room))
+	var a: Dictionary = registry.game_view(room)
+	room.game.players[0].pos += Vector2(10,0)
+	room.game.move_targets[0] = Vector2(272,160)
+	room.game.round_elapsed = 0.05
+	var b: Dictionary = registry.game_view(room)
+	app.client.accept(a)
+	app.client.accept(b)
+	app.presentation.reset()
+	app.presentation.push_snapshot(a, 10.0)
+	app.presentation.push_snapshot(b, 10.05)
+	app.arena.present_board(app.presentation.sample(10.075))
+	var board = app.arena.board
+	check(board.player_position(0).is_equal_approx(Vector2(225,160)), "shared board draws halfway displayed duck")
+	check(app.arena.game.players[0].pos == Vector2(230,160) and app.arena.game.board == b.board, "display interpolation leaves authoritative position and board unchanged")
+	check(is_zero_approx(board.vision_darkness(Vector2(152.2,160))), "Nightfall original clear radius follows displayed duck")
+	check(board.vision_darkness(Vector2(147,160)) > 0.0, "existing Nightfall falloff starts outside displayed clear radius")
+	var old := a.duplicate(true)
+	old.players[0].pos = [100,100]
+	app.client.accept(old)
+	check(app.arena.game.players[0].pos == Vector2(230,160) and app.client.game.players[0].pos == b.players[0].pos, "stale packets cannot rewind client or arena authority")
+	app.client.accept({"type": "left"})
+	check(app.presentation.sample(10.1).is_empty(), "leaving clears presentation history")
+	app.presentation.push_snapshot(a, 10.0)
+	app._disconnected()
+	check(app.presentation.sample(10.1).is_empty(), "disconnect clears presentation history")

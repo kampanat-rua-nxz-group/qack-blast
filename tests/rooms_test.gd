@@ -64,6 +64,7 @@ func _initialize() -> void:
 	test_same_tick_bomb_blocks_press_and_held_input()
 	test_input_press_intent()
 	test_map_round_snapshots()
+	test_snapshot_identity_and_targets()
 	finish()
 
 
@@ -171,3 +172,28 @@ func check(condition: bool, message: String) -> void:
 func finish() -> void:
 	print("Room checks: %d failure(s)" % failures)
 	quit(1 if failures else 0)
+
+
+func test_snapshot_identity_and_targets() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	var created: Dictionary = registry.create_room(1, "A")
+	registry.join_room(2, created.code, "B")
+	var room: Dictionary = registry.rooms[created.code]
+	check(registry.room_view(room).get("round_id", -1) == 0, "lobby has initial round identity")
+	registry.start_round(1)
+	room.game.board[1][2] = 0
+	registry.set_input(1, Vector2.RIGHT, false)
+	registry.tick(0.016)
+	var first: Dictionary = JSON.parse_string(JSON.stringify(registry.game_view(room)))
+	check(first.get("round_id", -1) == 1 and registry.room_view(room).get("round_id", -2) == first.get("round_id", -3), "room and game share prepared round identity")
+	check(first.players[0].get("move_target", []) == [272.0,160.0], "movement target survives JSON in rule coordinates")
+	check(first.players[1].get("move_target", []) == [0.0,0.0], "resting player has JSON safe zero target")
+	var second: Dictionary = registry.game_view(room)
+	check(second.get("snapshot_seq", 0) > first.get("snapshot_seq", 0), "central snapshot materialization advances sequence")
+	room.game.players[0].alive = false
+	room.game.resolve_round()
+	registry.tick(0.0)
+	registry.start_round(1)
+	var rematch: Dictionary = registry.game_view(room)
+	check(rematch.get("round_id", 0) == 2, "each rematch increments round identity")
+	check(rematch.get("snapshot_seq", 0) > second.get("snapshot_seq", 0), "sequence remains monotonic across rematches")
