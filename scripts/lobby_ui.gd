@@ -80,3 +80,36 @@ static func button(parent: Container, text: String, height: float, background: C
 		result.add_theme_stylebox_override(state, style)
 	parent.add_child(result)
 	return result
+
+
+static func connection_text(phase: String, category: String, waking: bool, local_server: bool) -> String:
+	match phase:
+		"connecting":
+			return "The server may be waking up. This can take about a minute." if waking else "Connecting to server… You can cancel."
+		"waiting_room":
+			return "Waiting for your room… You can cancel."
+		"failed":
+			match category:
+				"room_not_found": return "Room not found. It may have closed after a server restart. Check the code or create a room."
+				"room_full": return "Room is full. Try another room code or create a room."
+				"room_rejected": return "The room request was rejected. Check your details and try again."
+				"room_timeout": return "We could not confirm your room request. Retry when you are ready."
+				"disconnected": return "Connection lost. Rejoin as a new player; if a round is running, you will wait for the next round."
+				_: return "Could not connect. Check your connection and select Retry." + (" For local play, start the Godot room server." if local_server else "")
+	return "Enter a nickname to begin."
+
+
+static func is_loopback_server(url: String) -> bool:
+	var authority := url.get_slice("://", 1).get_slice("/", 0).get_slice("?", 0).to_lower()
+	if authority.begins_with("[::1]"):
+		return authority == "[::1]" or authority.begins_with("[::1]:")
+	var host := authority.get_slice(":", 0)
+	if host == "localhost":
+		return true
+	var parts := host.split(".")
+	if parts.size() != 4 or parts[0] != "127":
+		return false
+	for part in parts:
+		if not part.is_valid_int() or int(part) < 0 or int(part) > 255:
+			return false
+	return true

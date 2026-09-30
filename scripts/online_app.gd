@@ -1,5 +1,6 @@
 extends Control
 
+const ConnectionFlow = preload("res://scripts/connection_flow.gd")
 const PlayerInput = preload("res://scripts/player_input.gd")
 const RoomClient = preload("res://scripts/room_client.gd")
 const ArenaGame = preload("res://scripts/arena_game.gd")
@@ -25,6 +26,13 @@ var start_button: Button
 var map_button: Button
 var leave_button: Button
 var pending_request: Dictionary = {}
+var connection_flow = ConnectionFlow.new()
+var create_button: Button
+var join_button: Button
+var cancel_button: Button
+var retry_button: Button
+var rejoin_button: Button
+var can_rejoin := false
 var player_input = PlayerInput.new()
 var input_focused := true
 var input_clock := 0.0
@@ -40,7 +48,8 @@ func _ready() -> void:
 	arena.set_process_input(false)
 	arena.hide()
 	add_child(client)
-	client.transport_connected.connect(_connected)
+	client.transport_result.connect(_transport_result)
+	client.room_result.connect(_room_result)
 	client.room_changed.connect(_room_changed)
 	client.game_changed.connect(_game_changed)
 	client.error_received.connect(_show_error)
@@ -107,14 +116,24 @@ func build_entry_card() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	column.add_child(row)
-	var create_button := Ui.button(row, "CREATE ROOM", 47, Color("ffe1a6"), Color("73512d"))
+	create_button = Ui.button(row, "CREATE ROOM", 47, Color("ffe1a6"), Color("73512d"))
 	create_button.custom_minimum_size.x = 169
 	create_button.pressed.connect(func(): request({"type": "create", "name": name_field.text}))
-	var join_button := Ui.button(row, "JOIN ROOM", 47, Color("f9e8ed"), Color("92536b"))
+	join_button = Ui.button(row, "JOIN ROOM", 47, Color("f9e8ed"), Color("92536b"))
 	join_button.custom_minimum_size.x = 169
 	join_button.pressed.connect(func(): request({"type": "join", "name": name_field.text, "code": code_field.text}))
 	Ui.spacer(column, 8)
-	Ui.label(column, "Start the room server before creating a room.", 13, Ui.MUTED)
+	var recovery := HBoxContainer.new()
+	column.add_child(recovery)
+	cancel_button = Ui.button(recovery, "CANCEL", 40, Color("f9e8ed"), Color("92536b"))
+	cancel_button.pressed.connect(_cancel_connection)
+	retry_button = Ui.button(recovery, "RETRY", 40, Color("ffe1a6"), Color("73512d"))
+	retry_button.pressed.connect(_retry_connection)
+	rejoin_button = Ui.button(recovery, "REJOIN ROOM", 40, Color("e7f2ed"), Color("366b68"))
+	rejoin_button.pressed.connect(_rejoin_room)
+	cancel_button.hide()
+	retry_button.hide()
+	rejoin_button.hide()
 	Ui.label(column, "Each window controls one duck.", 13, Ui.MUTED)
 
 
@@ -140,19 +159,67 @@ func _copy_code() -> void:
 
 
 func request(message: Dictionary) -> void:
-	pending_request = message
-	status_label.text = "Connecting to server..."
-	if client.connected:
-		_connected()
-	else:
-		client.connect_to_server(server_url)
+	if connection_flow.busy():
+		return
+	can_rejoin = false
+	connection_flow.begin(message)
+	pending_request = connection_flow.pending_request.duplicate(true)
+	_connection_actions(connection_flow.advance(0.0))
 
 
-func _connected() -> void:
-	if not pending_request.is_empty():
-		client.send(pending_request)
-		pending_request = {}
-		status_label.text = "Connecting to room..."
+func _process(delta: float) -> void:
+	_connection_actions(connection_flow.advance(delta))
+
+
+func _transport_result(generation: int, connected: bool) -> void:
+	_connection_actions(connection_flow.on_transport_result(generation, connected))
+
+
+func _room_result(generation: int, message: Dictionary) -> void:
+	_connection_actions(connection_flow.on_room_result(generation, message))
+
+
+func _connection_actions(actions: Array) -> void:
+	for action in actions:
+		match action.type:
+			"close":
+				client.close_transport(action.attempt_id)
+			"connect":
+				if action.attempt_id == connection_flow.attempt_id and connection_flow.phase == "connecting":
+					client.connect_to_server(server_url, action.attempt_id)
+			"send_request":
+				if action.attempt_id == connection_flow.attempt_id and connection_flow.phase == "waiting_room":
+					client.send(action.request)
+					pending_request.clear()
+			"display_state":
+				_render_connection_state()
+	pending_request = connection_flow.pending_request.duplicate(true)
+
+
+func _render_connection_state() -> void:
+	var busy: bool = connection_flow.busy()
+	create_button.disabled = busy
+	join_button.disabled = busy
+	cancel_button.visible = busy
+	retry_button.visible = connection_flow.phase == "failed" and not connection_flow.retry_request.is_empty() and not can_rejoin
+	rejoin_button.visible = can_rejoin and not busy
+	if connection_flow.phase != "in_room":
+		status_label.text = Ui.connection_text(connection_flow.phase, connection_flow.error_category, connection_flow.waking, Ui.is_loopback_server(server_url))
+
+
+func _cancel_connection() -> void:
+	connection_flow.cancel()
+	_connection_actions(connection_flow.advance(0.0))
+	status_label.text = "Connection cancelled. Create or join when you are ready."
+
+
+func _retry_connection() -> void:
+	if not connection_flow.retry_request.is_empty():
+		request(connection_flow.retry_request.duplicate(true))
+
+
+func _rejoin_room() -> void:
+	request({"type": "join", "name": name_field.text, "code": code_field.text})
 
 
 func _room_changed(room: Dictionary) -> void:
@@ -307,6 +374,8 @@ func _change_map() -> void:
 
 
 func _show_error(message: String) -> void:
+	if connection_flow.phase == "failed":
+		return
 	pending_request = {}
 	if results.visible:
 		results.show_error(message)
@@ -315,6 +384,10 @@ func _show_error(message: String) -> void:
 
 
 func _left_room() -> void:
+	connection_flow.cancel()
+	_connection_actions(connection_flow.advance(0.0))
+	can_rejoin = false
+	rejoin_button.hide()
 	_reset_input(false)
 	lobby.show()
 	arena.hide()
@@ -333,5 +406,15 @@ func _left_room() -> void:
 
 
 func _disconnected() -> void:
+	if connection_flow.phase == "waiting_room":
+		return
+	var previous_code := code_field.text
 	_left_room()
-	status_label.text = "Server disconnected. Reconnect to create or join a room."
+	client.person_id = 0
+	client.room = {}
+	client.game = {}
+	code_field.text = previous_code
+	can_rejoin = not previous_code.is_empty()
+	connection_flow.phase = "failed"
+	connection_flow.error_category = "disconnected"
+	_render_connection_state()
