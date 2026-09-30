@@ -15,7 +15,7 @@ func create_room(peer_id: int, nickname: String) -> Dictionary:
 	if peer_rooms.has(peer_id):
 		return {"ok": false, "error": "Already in a room"}
 	var code := make_code()
-	rooms[code] = {"code": code, "host": 0, "people": [], "phase": "lobby", "wall_mode": "fixed", "game": null, "lineup": [], "directions": [], "plants": [], "input_remaining": []}
+	rooms[code] = {"code": code, "host": 0, "people": [], "phase": "lobby", "wall_mode": "fixed", "game": null, "lineup": [], "directions": [], "plants": [], "move_presses": [], "input_remaining": []}
 	return join_room(peer_id, code, nickname)
 
 
@@ -64,6 +64,7 @@ func leave(peer_id: int) -> void:
 		leaving.disconnect_remaining = DISCONNECT_GRACE
 		room.directions[leaving.slot] = Vector2.ZERO
 		room.plants[leaving.slot] = false
+		room.move_presses[leaving.slot] = Vector2.ZERO
 		room.input_remaining[leaving.slot] = 0.0
 	var connected: Array = []
 	for person in room.people:
@@ -99,6 +100,7 @@ func start_round(peer_id: int) -> bool:
 	room.lineup = []
 	room.directions = []
 	room.plants = []
+	room.move_presses = []
 	room.input_remaining = []
 	var game = ArenaGame.new()
 	game.rng.randomize()
@@ -112,6 +114,7 @@ func start_round(peer_id: int) -> bool:
 		room.lineup.append(person.id)
 		room.directions.append(Vector2.ZERO)
 		room.plants.append(false)
+		room.move_presses.append(Vector2.ZERO)
 		room.input_remaining.append(0.0)
 		game.scores.append(person.scores)
 	game.new_round()
@@ -120,7 +123,7 @@ func start_round(peer_id: int) -> bool:
 	return true
 
 
-func set_input(peer_id: int, direction: Vector2, plant: bool) -> bool:
+func set_input(peer_id: int, direction: Vector2, plant: bool, move_press: Vector2 = Vector2.ZERO) -> bool:
 	var room := room_for_peer(peer_id)
 	if room.is_empty() or room.phase != "playing":
 		return false
@@ -129,7 +132,12 @@ func set_input(peer_id: int, direction: Vector2, plant: bool) -> bool:
 		return false
 	if direction not in [Vector2.ZERO, Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
 		return false
+	if move_press not in [Vector2.ZERO, Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
+		return false
 	room.directions[person.slot] = direction
+	# Neutral releases keep the latest press until the simulation consumes it.
+	if move_press != Vector2.ZERO:
+		room.move_presses[person.slot] = move_press
 	room.input_remaining[person.slot] = 0.2
 	if plant:
 		room.plants[person.slot] = true
@@ -144,11 +152,17 @@ func tick(delta: float) -> void:
 			room.input_remaining[i] -= delta
 			if room.input_remaining[i] <= 0.0:
 				room.directions[i] = Vector2.ZERO
+				room.move_presses[i] = Vector2.ZERO
 		for person in room.people:
 			if person.peer == 0 and person.slot >= 0 and person.disconnect_remaining > 0.0:
 				person.disconnect_remaining -= delta
 				if person.disconnect_remaining <= 0.0:
 					room.game.players[person.slot].alive = false
+		for i in range(room.move_presses.size()):
+			var press: Vector2 = room.move_presses[i]
+			if press != Vector2.ZERO and room.game.players[i].alive and room.game.move_targets[i] == Vector2.ZERO:
+				room.game.start_move(i, press)
+			room.move_presses[i] = Vector2.ZERO
 		room.game.step(delta, room.directions, room.plants)
 		for i in range(room.plants.size()):
 			room.plants[i] = false

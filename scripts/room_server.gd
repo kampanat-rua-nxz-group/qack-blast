@@ -48,8 +48,9 @@ func handle(peer_id: int, message: Dictionary) -> void:
 			result = {"ok": registry.start_round(peer_id)}
 		"input":
 			var raw = message.get("direction", [])
-			if raw is Array and raw.size() == 2 and typeof(raw[0]) in [TYPE_INT, TYPE_FLOAT] and typeof(raw[1]) in [TYPE_INT, TYPE_FLOAT]:
-				result = {"ok": registry.set_input(peer_id, Vector2(raw[0], raw[1]), message.get("plant", false) == true)}
+			var raw_press = message.get("move_press", [0, 0])
+			if valid_direction_array(raw) and valid_direction_array(raw_press):
+				result = {"ok": registry.set_input(peer_id, Vector2(raw[0], raw[1]), message.get("plant", false) == true, Vector2(raw_press[0], raw_press[1]))}
 		"":
 			pass
 	if not result.get("ok", false):
@@ -64,6 +65,10 @@ func handle(peer_id: int, message: Dictionary) -> void:
 		for person in room.people:
 			if person.peer != 0:
 				push_state(person.peer)
+
+
+func valid_direction_array(raw: Variant) -> bool:
+	return raw is Array and raw.size() == 2 and typeof(raw[0]) in [TYPE_INT, TYPE_FLOAT] and typeof(raw[1]) in [TYPE_INT, TYPE_FLOAT]
 
 
 func push_state(peer_id: int) -> void:

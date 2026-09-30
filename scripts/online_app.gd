@@ -1,5 +1,6 @@
 extends Control
 
+const PlayerInput = preload("res://scripts/player_input.gd")
 const RoomClient = preload("res://scripts/room_client.gd")
 const ArenaGame = preload("res://scripts/arena_game.gd")
 const ArenaScene = preload("res://scenes/arena.tscn")
@@ -24,8 +25,8 @@ var start_button: Button
 var map_button: Button
 var leave_button: Button
 var pending_request: Dictionary = {}
-var last_drop := false
-var pending_drop := false
+var player_input = PlayerInput.new()
+var input_focused := true
 var input_clock := 0.0
 
 
@@ -51,7 +52,7 @@ func _ready() -> void:
 	results.hide()
 	results.change_map_requested.connect(_change_map)
 	results.play_again_requested.connect(func(): client.send({"type": "start"}))
-	results.leave_requested.connect(func(): client.send({"type": "leave"}))
+	results.leave_requested.connect(_leave_room)
 
 
 func web_server_param() -> String:
@@ -91,7 +92,7 @@ func build_lobby() -> void:
 	start_button.pressed.connect(func(): client.send({"type": "start"}))
 	leave_button = Ui.button(status_column, "LEAVE ROOM", 42, Color("f9e8ed"), Color("92536b"))
 	leave_button.disabled = true
-	leave_button.pressed.connect(func(): client.send({"type": "leave"}))
+	leave_button.pressed.connect(_leave_room)
 
 
 func build_entry_card() -> void:
@@ -157,6 +158,13 @@ func _connected() -> void:
 func _room_changed(room: Dictionary) -> void:
 	var playing: bool = room.phase == "playing"
 	var showing_results: bool = room.phase == "results"
+	if arena.visible and not playing:
+		_reset_input()
+	elif playing and not arena.visible:
+		_reset_input(false)
+		var focused := get_viewport().gui_get_focus_owner()
+		if focused != null:
+			focused.release_focus()
 	if showing_results and not results.visible:
 		results.clear_feedback()
 	lobby.visible = not playing and not showing_results
@@ -241,26 +249,55 @@ func _game_changed(snapshot: Dictionary) -> void:
 		results.present(client.room, snapshot, client.person_id)
 
 
-func _physics_process(delta: float) -> void:
-	if client.room.is_empty() or client.room.phase != "playing":
+func _input(event: InputEvent) -> void:
+	if not input_focused or client.room.is_empty() or client.room.phase != "playing" or not event is InputEventKey:
 		return
-	var direction := Vector2.ZERO
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
-		direction = Vector2.UP
-	elif Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-		direction = Vector2.DOWN
-	elif Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
-		direction = Vector2.LEFT
-	elif Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
-		direction = Vector2.RIGHT
-	var drop := Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_ENTER)
-	pending_drop = pending_drop or (drop and not last_drop)
-	last_drop = drop
-	input_clock += delta
-	if input_clock >= 1.0 / 30.0 or pending_drop:
+	var key := event as InputEventKey
+	var previous: Vector2 = player_input.direction()
+	var keycode: int = key.physical_keycode if key.physical_keycode != 0 else key.keycode
+	player_input.handle_key(keycode, key.pressed, key.echo)
+	var press: Vector2 = player_input.consume_move_press()
+	var plant: bool = player_input.consume_bomb_press()
+	if previous != player_input.direction() or press != Vector2.ZERO or plant:
+		_send_input(press, plant)
 		input_clock = 0.0
-		client.send({"type": "input", "direction": [direction.x, direction.y], "plant": pending_drop})
-		pending_drop = false
+
+
+func _physics_process(delta: float) -> void:
+	if not input_focused or client.room.is_empty() or client.room.phase != "playing":
+		return
+	input_clock += delta
+	if input_clock >= 1.0 / 30.0:
+		input_clock = 0.0
+		_send_input()
+
+
+func _send_input(move_press: Vector2 = Vector2.ZERO, plant: bool = false) -> void:
+	var direction: Vector2 = player_input.direction()
+	var command := {"type": "input", "direction": [direction.x, direction.y], "plant": plant}
+	if move_press != Vector2.ZERO:
+		command.move_press = [move_press.x, move_press.y]
+	client.send(command)
+
+
+func _reset_input(send_neutral: bool = true) -> void:
+	player_input.reset()
+	input_clock = 0.0
+	if send_neutral and not client.room.is_empty():
+		_send_input()
+
+
+func _notification(what: int) -> void:
+	if what == MainLoop.NOTIFICATION_APPLICATION_FOCUS_OUT:
+		input_focused = false
+		_reset_input()
+	elif what == MainLoop.NOTIFICATION_APPLICATION_FOCUS_IN:
+		input_focused = true
+
+
+func _leave_room() -> void:
+	_reset_input()
+	client.send({"type": "leave"})
 
 
 func _change_map() -> void:
@@ -278,6 +315,7 @@ func _show_error(message: String) -> void:
 
 
 func _left_room() -> void:
+	_reset_input(false)
 	lobby.show()
 	arena.hide()
 	arena.player_names.clear()
