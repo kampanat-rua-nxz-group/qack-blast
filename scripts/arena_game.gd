@@ -28,6 +28,7 @@ const WATER_SPEED_MULTIPLIER = 0.8
 const SPEED_PICKUP_INCREMENT = 0.25
 const SPEED_BONUS_MAX = 0.5
 const KICK_TILES_PER_SECOND = 4.0
+const MAX_PENDING_EVENTS = 256
 const DIRECTIONS = [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
 const MAP_MODES = ["fixed", "random", "pond", "frost", "night"]
 const MAP_NAMES = {"fixed": "Classic", "random": "Random", "pond": "Lily Pond", "frost": "Frost Garden", "night": "Nightfall"}
@@ -53,6 +54,8 @@ var result := ""
 var rng := RandomNumberGenerator.new()
 var move_targets := [Vector2.ZERO, Vector2.ZERO]
 var slide_active: Array[bool] = []
+var event_counter := 0
+var pending_events: Array = []
 
 
 func new_round() -> bool:
@@ -73,6 +76,8 @@ func new_round() -> bool:
 		scores.append({"wins": 0, "kills": 0})
 	round_over = false
 	result = ""
+	event_counter = 0
+	pending_events.clear()
 	round_elapsed = 0.0
 	danger_waves = 0
 	next_danger_at = DANGER_START
@@ -145,7 +150,7 @@ func new_round() -> bool:
 		terrain[tile.y][tile.x] = 0
 	players = []
 	for tile in spawns:
-		players.append({"pos": center(tile), "alive": true, "bomb_limit": 1, "range": 1, "vision": 1, "speed_bonus": 0.0, "can_kick": false, "safe_bomb": Vector2i(-1, -1), "facing": 0.0})
+		players.append({"pos": center(tile), "alive": true, "bomb_limit": 1, "range": 1, "vision": 1, "speed_bonus": 0.0, "can_kick": false, "safe_bomb": Vector2i(-1, -1), "facing": 0.0, "elimination_cause": {}})
 
 	return true
 
@@ -320,6 +325,7 @@ func step_slice(delta: float, directions: Array, plant_requests: Array, move_pre
 		var tile: Vector2i = tile_at(players[i].pos)
 		if pickups.has(tile):
 			var kind: int = pickups[tile]
+			var before := [players[i].bomb_limit, players[i].range, players[i].vision, players[i].speed_bonus, players[i].can_kick]
 			match kind:
 				PICKUP_BOMB_CAPACITY:
 					players[i].bomb_limit = mini(players[i].bomb_limit + 1, 5)
@@ -338,22 +344,29 @@ func step_slice(delta: float, directions: Array, plant_requests: Array, move_pre
 					players[i].speed_bonus = minf(players[i].speed_bonus + SPEED_PICKUP_INCREMENT, SPEED_BONUS_MAX)
 				PICKUP_BOMB_KICK:
 					players[i].can_kick = true
+			var granted: bool = before != [players[i].bomb_limit, players[i].range, players[i].vision, players[i].speed_bonus, players[i].can_kick]
+			emit_event("pickup_collected", {"player": i, "tile": tile_array(tile), "pickup": kind, "granted": granted})
 			pickups.erase(tile)
 		var closest_distance := 1_000_000
 		var closest_owner := -1
+		var closest_flame := {}
 		var tied := false
+		var hit := false
 		for flame in flames:
 			if flame.tile != tile:
 				continue
-			players[i].alive = false
+			hit = true
 			if flame.distance < closest_distance:
 				closest_distance = flame.distance
 				closest_owner = flame.owner
+				closest_flame = flame
 				tied = false
 			elif flame.distance == closest_distance and flame.owner != closest_owner:
 				tied = true
-		if not players[i].alive and not tied and closest_owner >= 0 and closest_owner != i:
-			scores[closest_owner].kills += 1
+		if hit:
+			eliminate(i, blast_cause(i, closest_flame, closest_owner, tied))
+			if not tied and closest_owner >= 0 and closest_owner != i:
+				scores[closest_owner].kills += 1
 	resolve_round()
 
 
@@ -461,7 +474,7 @@ func resolve_hazard(hazard: Dictionary) -> void:
 					bombs.erase(bomb)
 			for i in range(players.size()):
 				if players[i].alive and overlaps_tile(players[i].pos, tile):
-					players[i].alive = false
+					eliminate(i, {"kind": "flood", "owner": -1})
 				if move_targets[i] != Vector2.ZERO and tile_at(move_targets[i]) == tile:
 					move_targets[i] = Vector2.ZERO
 	elif hazard.kind == "closing_walls":
@@ -473,7 +486,7 @@ func resolve_hazard(hazard: Dictionary) -> void:
 					bombs.erase(bomb)
 			for i in range(players.size()):
 				if players[i].alive and overlaps_tile(players[i].pos, tile):
-					players[i].alive = false
+					eliminate(i, {"kind": "closing_walls", "owner": -1})
 				if move_targets[i] != Vector2.ZERO and tile_at(move_targets[i]) == tile:
 					move_targets[i] = Vector2.ZERO
 
@@ -593,6 +606,7 @@ func place_bomb(i: int) -> void:
 		return
 	bombs.append({"tile": tile, "owner": i, "range": players[i].range, "time": FUSE})
 	players[i].safe_bomb = tile
+	emit_event("bomb_placed", {"tile": tile_array(tile), "owner": i})
 
 
 func update_moving_bombs(delta: float) -> void:
@@ -647,10 +661,12 @@ func update_bombs(delta: float) -> void:
 		if not bombs.has(bomb):
 			continue
 		bombs.erase(bomb)
+		emit_event("bomb_exploded", {"tile": tile_array(bomb.tile), "owner": bomb.owner, "danger": bomb.get("danger", false)})
 		if bomb.get("danger", false):
 			for x in range(WIDTH):
 				var row_tile := Vector2i(x, bomb.tile.y)
 				blast_cell(row_tile, -1, absi(x - bomb.tile.x), queue)
+				flames.back().source = "danger_bomb"
 				if board[row_tile.y][row_tile.x] == CRATE:
 					board[row_tile.y][row_tile.x] = OPEN
 					destroyed_crates.append(row_tile)
@@ -659,6 +675,7 @@ func update_bombs(delta: float) -> void:
 					continue
 				var column_tile := Vector2i(bomb.tile.x, y)
 				blast_cell(column_tile, -1, absi(y - bomb.tile.y), queue)
+				flames.back().source = "danger_bomb"
 				if board[column_tile.y][column_tile.x] == CRATE:
 					board[column_tile.y][column_tile.x] = OPEN
 					destroyed_crates.append(column_tile)
@@ -712,6 +729,53 @@ func resolve_round() -> void:
 	if alive.size() == 1:
 		scores[alive[0]].wins += 1
 	result = "DRAW" if alive.is_empty() else "PLAYER %d WINS" % (alive[0] + 1)
+	emit_event("round_ended", {"result": result, "winner": -1 if alive.is_empty() else alive[0]})
+
+
+func tile_array(tile: Vector2i) -> Array:
+	return [tile.x, tile.y]
+
+
+func emit_event(kind: String, payload: Dictionary) -> void:
+	event_counter += 1
+	var event := payload.duplicate(true)
+	event.event_id = event_counter
+	event.kind = kind
+	event.elapsed = round_elapsed
+	pending_events.append(event)
+	if pending_events.size() > MAX_PENDING_EVENTS:
+		pending_events.pop_front()
+
+
+func take_events() -> Array:
+	var events := pending_events
+	pending_events = []
+	return events
+
+
+func eliminate(i: int, cause: Dictionary) -> void:
+	if not players[i].alive:
+		return
+	players[i].alive = false
+	players[i].elimination_cause = cause
+	emit_event("player_eliminated", {"player": i, "tile": tile_array(tile_at(players[i].pos)), "cause": cause})
+
+
+func eliminate_disconnected(i: int) -> void:
+	eliminate(i, {"kind": "disconnect", "owner": -1})
+
+
+func blast_cause(i: int, flame: Dictionary, owner: int, tied: bool) -> Dictionary:
+	if tied:
+		return {"kind": "ambiguous_blasts", "owner": -1}
+	if owner == i:
+		return {"kind": "own_bomb", "owner": i}
+	if owner >= 0:
+		return {"kind": "other_bomb", "owner": owner}
+	var kind: String = flame.get("kind", "")
+	if kind in ["random_burst", "blizzard"]:
+		return {"kind": kind, "owner": -1}
+	return {"kind": "danger_bomb", "owner": -1}
 
 
 func score_order() -> Array[int]:

@@ -2,6 +2,7 @@ extends Node2D
 
 const ArenaGame = preload("res://scripts/arena_game.gd")
 const ArenaBoard = preload("res://scripts/arena_board.gd")
+const CharacterCatalog = preload("res://scripts/character_catalog.gd")
 const COLORS = ArenaBoard.COLORS
 const BOARD_REGION = Rect2(142, 82, 676, 572)
 
@@ -224,27 +225,58 @@ func _draw_background() -> void:
 	rounded_box(Rect2(138, 78, 684, 580), Color("fffdf6"), 11.0, background)
 
 
-func draw_player_card(i: int) -> void:
+func player_card_rect(i: int, count: int) -> Rect2:
 	var x := 10.0 if i % 2 == 0 else 830.0
+	if count >= 7:
+		return Rect2(x, 82.0 + (i / 2) * 112.0, 120, 108)
+	var compact: bool = count > 4
+	return Rect2(x, 82.0 + (i / 2) * 192.0 if compact else (107.0 if i < 2 else 335.0), 120, 181.0 if compact else 202.0)
+
+
+func shortened_name(value: String, width: float, font_size: int) -> String:
+	var font := ThemeDB.fallback_font
+	if font.get_string_size(value,HORIZONTAL_ALIGNMENT_LEFT,-1,font_size).x <= width:
+		return value
+	while value.length() > 1 and font.get_string_size(value + "…",HORIZONTAL_ALIGNMENT_LEFT,-1,font_size).x > width:
+		value = value.left(value.length()-1)
+	return value + "…"
+
+
+func draw_player_card(i: int) -> void:
+	var rect := player_card_rect(i,game.players.size())
+	var x := rect.position.x
+	var y := rect.position.y
+	var dense: bool = game.players.size() >= 7
 	var compact: bool = game.players.size() > 4
-	var y := 82.0 + (i / 2) * 192.0 if compact else (107.0 if i < 2 else 335.0)
-	var card_height := 181.0 if compact else 202.0
-	var tint: Color = COLORS[i].lightened(0.72)
-	rounded_box(Rect2(x, y + 3, 120, card_height), Color("e3d8d5"), 17.0)
-	rounded_box(Rect2(x, y, 120, card_height), Color("fffdf7"), 17.0)
-	rounded_box(Rect2(x + 8, y + 8, 104, 53 if compact else 65), tint, 12.0)
-	draw_duck(Vector2(x + 60, y + (33 if compact else 40)), i)
+	var look: Dictionary = CharacterCatalog.appearance(game.players[i].get("avatar_id",i))
+	var tint: Color = look.palette.body.lightened(0.72)
+	rounded_box(Rect2(rect.position+Vector2(0,3),rect.size),Color("e3d8d5"),17.0)
+	rounded_box(rect,Color("fffdf7"),17.0)
+	rounded_box(Rect2(x+8,y+8,104,35 if dense else (53 if compact else 65)),tint,12.0)
+	board.draw_duck(Vector2(x+60,y+(26 if dense else (33 if compact else 40))),i,0.0,0.0,self,34.0 if dense else 52.0)
+	centered_text(look.badge,Vector2(x+22,y+27),14,Color("403d57"))
 	var name := player_label(i)
-	var name_size := 17
-	while ThemeDB.fallback_font.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1, name_size).x > 108.0 and name_size > 9:
-		name_size -= 1
-	centered_text(name, Vector2(x + 60, y + (84 if compact else 101)), name_size, Color("403d57"))
-	centered_text(("YOU · " if not player_marker(i).is_empty() else "") + ("READY!" if game.players[i].alive else "OUT!"), Vector2(x + 60, y + (105 if compact else 122)), 13, Color("5f9b80") if game.players[i].alive else Color("c77c83"))
-	centered_text("BOMB %d   FIRE %d" % [game.players[i].bomb_limit, game.players[i].range], Vector2(x + 60, y + (130 if compact else 149)), 12, Color("827b8b"))
+	var name_size := 14 if dense else 17
+	if dense:
+		name = shortened_name(name,108.0,name_size)
+	else:
+		while ThemeDB.fallback_font.get_string_size(name,HORIZONTAL_ALIGNMENT_LEFT,-1,name_size).x > 108.0 and name_size > 9:
+			name_size -= 1
+	centered_text(name,Vector2(x+60,y+(60 if dense else (84 if compact else 101))),name_size,Color("403d57"))
+	centered_text(("YOU · " if not player_marker(i).is_empty() else "")+("READY!" if game.players[i].alive else "OUT!"),Vector2(x+60,y+(79 if dense else (105 if compact else 122))),13,Color("5f9b80") if game.players[i].alive else Color("c77c83"))
+	if dense:
+		if not networked or i == viewer_slot:
+			var upgrades := "B%d F%d" % [game.players[i].bomb_limit,game.players[i].range]
+			if game.wall_mode == "night": upgrades += " S%d" % game.players[i].vision
+			elif game.wall_mode == "pond": upgrades += " %d%%" % int((1.0+game.players[i].speed_bonus)*100)
+			elif game.wall_mode == "frost": upgrades += " KICK" if game.players[i].can_kick else ""
+			centered_text(upgrades,Vector2(x+60,y+98),12,Color("827b8b"))
+		return
+	centered_text("BOMB %d   FIRE %d" % [game.players[i].bomb_limit,game.players[i].range],Vector2(x+60,y+(130 if compact else 149)),12,Color("827b8b"))
 	if game.wall_mode == "night":
-		centered_text("SIGHT %d" % game.players[i].vision, Vector2(x + 60, y + (148 if compact else 166)), 12, Color("827b8b"))
+		centered_text("SIGHT %d" % game.players[i].vision,Vector2(x+60,y+(148 if compact else 166)),12,Color("827b8b"))
 	elif game.wall_mode == "pond":
-		centered_text("SPEED %d%%" % int((1.0 + game.players[i].speed_bonus) * 100), Vector2(x + 60, y + (148 if compact else 166)), 12, Color("827b8b"))
+		centered_text("SPEED %d%%" % int((1.0+game.players[i].speed_bonus)*100),Vector2(x+60,y+(148 if compact else 166)),12,Color("827b8b"))
 	elif game.wall_mode == "frost":
-		centered_text("BOMB KICK %s" % ("ON" if game.players[i].can_kick else "OFF"), Vector2(x + 60, y + (148 if compact else 166)), 12, Color("827b8b"))
-	centered_text("WINS %d   KILLS %d" % [game.scores[i].wins, game.scores[i].kills], Vector2(x + 60, y + (166 if compact else 181)), 12, Color("827b8b"))
+		centered_text("BOMB KICK %s" % ("ON" if game.players[i].can_kick else "OFF"),Vector2(x+60,y+(148 if compact else 166)),12,Color("827b8b"))
+	centered_text("WINS %d   KILLS %d" % [game.scores[i].wins,game.scores[i].kills],Vector2(x+60,y+(166 if compact else 181)),12,Color("827b8b"))

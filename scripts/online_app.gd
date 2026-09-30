@@ -7,6 +7,8 @@ const ArenaPresentation = preload("res://scripts/arena_presentation.gd")
 const ArenaGame = preload("res://scripts/arena_game.gd")
 const ArenaScene = preload("res://scenes/arena.tscn")
 const LobbyArt = preload("res://scripts/lobby_art.gd")
+const CharacterCatalog = preload("res://scripts/character_catalog.gd")
+const DuckArt = preload("res://scripts/duck_art.gd")
 const Ui = preload("res://scripts/lobby_ui.gd")
 const MapPicker = preload("res://scripts/map_picker.gd")
 const ResultsScene = preload("res://scenes/results.tscn")
@@ -23,6 +25,9 @@ var waiting_card: Control
 var room_label: Label
 var room_detail_label: Label
 var roster_label: Label
+var roster_rows: VBoxContainer
+var roster_people: Array = []
+var roster_person_id := -1
 var status_label: Label
 var start_button: Button
 var map_button: Button
@@ -97,8 +102,19 @@ func build_lobby() -> void:
 	room_detail_label = Ui.label(status_column, "No room yet", 16, Ui.NAVY)
 	room_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	Ui.spacer(status_column, 8)
-	roster_label = Ui.label(status_column, "", 14, Ui.NAVY)
-	roster_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var roster_scroll := ScrollContainer.new()
+	roster_scroll.name = "RosterScroll"
+	roster_scroll.custom_minimum_size.y = 80
+	roster_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	roster_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	status_column.add_child(roster_scroll)
+	roster_rows = VBoxContainer.new()
+	roster_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	roster_scroll.add_child(roster_rows)
+	# Text summary remains available to checks and assistive inspection.
+	roster_label = Label.new()
+	roster_label.hide()
+	status_column.add_child(roster_label)
 	status_label = Ui.label(status_column, "Enter a nickname to begin.", 14, Ui.MUTED)
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.custom_minimum_size.y = 72
@@ -279,6 +295,7 @@ func _room_changed(room: Dictionary) -> void:
 	for person in room.people:
 		lines.append("%s%s%s%s" % [person.name, " (YOU)" if person.id == client.person_id else "", " (host)" if person.id == room.host else "", " (offline)" if not person.connected else ""])
 	roster_label.text = "\n".join(lines)
+	_render_roster(room.people)
 	var host: bool = room.host == client.person_id
 	var connected_count := 0
 	for person in room.people:
@@ -319,7 +336,7 @@ func _game_changed(snapshot: Dictionary) -> void:
 	game.players.clear()
 	game.move_targets.clear()
 	for player in snapshot.players:
-		game.players.append({"pos": Vector2(player.pos[0], player.pos[1]), "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.get("speed_bonus", 0.0), "can_kick": player.get("can_kick", false), "facing": player.facing})
+		game.players.append({"pos": Vector2(player.pos[0], player.pos[1]), "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.get("speed_bonus", 0.0), "can_kick": player.get("can_kick", false), "facing": player.facing, "avatar_id": player.get("avatar_id", game.players.size())})
 		game.move_targets.append(Vector2(player.move_target[0], player.move_target[1]))
 	game.player_count = game.players.size()
 	game.bombs.clear()
@@ -460,6 +477,7 @@ func _left_room() -> void:
 	room_label.text = ""
 	room_detail_label.text = "No room yet"
 	roster_label.text = ""
+	_render_roster([])
 	status_label.text = "Left room."
 	start_button.disabled = true
 	map_button.disabled = true
@@ -479,3 +497,28 @@ func _disconnected() -> void:
 	connection_flow.phase = "failed"
 	connection_flow.error_category = "disconnected"
 	_render_connection_state()
+
+
+func _render_roster(people: Array) -> void:
+	if people == roster_people and roster_person_id == client.person_id:
+		return
+	roster_people = people.duplicate(true)
+	roster_person_id = client.person_id
+	for row in roster_rows.get_children():
+		roster_rows.remove_child(row)
+		row.queue_free()
+	for person in people:
+		var row := HBoxContainer.new()
+		roster_rows.add_child(row)
+		var look := CharacterCatalog.appearance(person.get("avatar_id", -1))
+		row.add_child(DuckArt.portrait(look,32.0))
+		var name := "%s · %s%s%s" % [look.badge,person.name," (YOU)" if person.id == client.person_id else ""," (offline)" if not person.connected else ""]
+		var label := Label.new()
+		row.add_child(label)
+		label.text = name
+		label.add_theme_font_size_override("font_size",14)
+		label.add_theme_color_override("font_color",Ui.NAVY)
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.clip_text = true
+		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		label.tooltip_text = name

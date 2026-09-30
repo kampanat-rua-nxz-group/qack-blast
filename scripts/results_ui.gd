@@ -6,12 +6,15 @@ signal leave_requested
 
 const ArenaGame = preload("res://scripts/arena_game.gd")
 const LobbyArt = preload("res://scripts/lobby_art.gd")
+const CharacterCatalog = preload("res://scripts/character_catalog.gd")
+const DuckArt = preload("res://scripts/duck_art.gd")
 const Ui = preload("res://scripts/lobby_ui.gd")
 
 var room_code: String = ""
 var feedback: String = ""
 var displayed_people: Array = []
 var displayed_host := -1
+var displayed_person_id := -1
 var room_code_label: Label
 var outcome_label: Label
 var map_label: Label
@@ -67,6 +70,11 @@ func _ready() -> void:
 	var headings := HBoxContainer.new()
 	column.add_child(headings)
 	_add_score_cells(headings, "#", "PLAYER", "WINS", "KILLS")
+	var portrait_gap := Control.new()
+	portrait_gap.name = "PortraitGap"
+	portrait_gap.custom_minimum_size.x = 54  # 32 px portrait + 18 px badge + one separation
+	headings.add_child(portrait_gap)
+	headings.move_child(portrait_gap, 1)
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size.y = 200
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -107,10 +115,11 @@ func present(room: Dictionary, game: Dictionary, person_id: int) -> void:
 	for person in people:
 		if person.connected:
 			connected_count += 1
-	if people != displayed_people or room.host != displayed_host:
-		_render_leaderboard(people, room.host)
+	if people != displayed_people or room.host != displayed_host or person_id != displayed_person_id:
+		_render_leaderboard(people, room.host, person_id)
 		displayed_people = people.duplicate(true)
 		displayed_host = room.host
+		displayed_person_id = person_id
 	var host: bool = room.host == person_id
 	map_button.disabled = room.get("phase", "results") not in ["lobby", "results"]
 	replay_button.disabled = not host or connected_count < 2
@@ -129,7 +138,7 @@ func _outcome_text(game: Dictionary, people: Array) -> String:
 	return outcome
 
 
-func _render_leaderboard(people: Array, host_id: int) -> void:
+func _render_leaderboard(people: Array, host_id: int, person_id: int) -> void:
 	var entries: Array = []
 	for i in range(people.size()):
 		entries.append({"person": people[i], "index": i})
@@ -140,6 +149,8 @@ func _render_leaderboard(people: Array, host_id: int) -> void:
 	for i in range(entries.size()):
 		var person: Dictionary = entries[i].person
 		var name: String = str(person.name)
+		if person.id == person_id:
+			name += " (YOU)"
 		if person.id == host_id:
 			name += " (host)"
 		if not person.connected:
@@ -147,7 +158,14 @@ func _render_leaderboard(people: Array, host_id: int) -> void:
 		var row := HBoxContainer.new()
 		row.name = "ScoreRow"
 		leaderboard_rows.add_child(row)
+		var look := CharacterCatalog.appearance(person.get("avatar_id", -1))
 		_add_score_cells(row, str(i + 1), name, str(person.wins), str(person.kills))
+		row.add_child(DuckArt.portrait(look,32.0))
+		row.move_child(row.get_node("Portrait"),1)
+		row.get_node("Portrait").tooltip_text = "Badge %s · participant %s" % [look.badge,person.id]
+		var badge := _text(row,look.badge,"Badge",14,Ui.NAVY)
+		badge.custom_minimum_size.x = 18
+		row.move_child(badge,2)
 
 
 func show_error(message: String) -> void:

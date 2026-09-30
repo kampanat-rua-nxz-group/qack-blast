@@ -75,6 +75,11 @@ func _initialize() -> void:
 	test_expanded_geometry_snapshot()
 	test_map_round_snapshots()
 	test_snapshot_identity_and_targets()
+	test_event_batches_drain_in_order()
+	test_final_events_when_entering_results()
+	test_event_cursor_late_join_and_reset()
+	test_disconnect_expiry_event_and_cause()
+	test_room_events_are_bounded()
 	finish()
 
 
@@ -318,3 +323,106 @@ func test_late_join_spectates() -> void:
 	room.game.resolve_round()
 	registry.tick(0.0)
 	check(registry.start_round(10) and room.phase == "countdown" and room.game.players.size() == 3 and room.people.back().slot == 2, "rematch countdown includes spectator in fresh lineup")
+
+
+func event_room():
+	var registry = load("res://scripts/room_registry.gd").new()
+	var created: Dictionary = registry.create_room(1, "A")
+	registry.join_room(2, created.code, "B")
+	registry.start_round(1)
+	registry.tick(3.0)
+	var room: Dictionary = registry.rooms[created.code]
+	for y in range(1, room.game.HEIGHT - 1):
+		for x in range(1, room.game.WIDTH - 1):
+			if room.game.board[y][x] != room.game.WALL:
+				room.game.board[y][x] = room.game.OPEN
+	registry.take_room_events(room)
+	return [registry, room]
+
+
+func test_event_batches_drain_in_order() -> void:
+	var pair = event_room()
+	var registry = pair[0]
+	var room: Dictionary = pair[1]
+	registry.set_input(1, Vector2.ZERO, true)
+	registry.tick(0.016)
+	registry.set_input(2, Vector2.ZERO, true)
+	registry.tick(0.016)
+	var batch: Array = registry.take_room_events(room)
+	var ids: Array = batch.map(func(event): return event.event_id)
+	check(batch.size() == 2 and batch[0].kind == "bomb_placed" and ids == [1, 2], "registry batch keeps ordered event ids")
+	check(JSON.parse_string(JSON.stringify(batch))[0].tile == [1.0, 1.0], "batch tiles serialize as JSON arrays")
+	check(registry.take_room_events(room).is_empty(), "batch is cleared after dispatch")
+	registry.tick(0.016)
+	check(registry.take_room_events(room).is_empty(), "quiet tick produces no events")
+
+
+func test_final_events_when_entering_results() -> void:
+	var pair = event_room()
+	var registry = pair[0]
+	var room: Dictionary = pair[1]
+	room.game.players[0].pos = room.game.center(Vector2i(3, 3))
+	room.game.bombs = [{"tile": Vector2i(3, 3), "owner": 0, "range": 1, "time": 0.0}]
+	registry.tick(0.016)
+	check(room.phase == "results", "fatal blast enters results")
+	var batch: Array = registry.take_room_events(room)
+	var kinds: Array = batch.map(func(event): return event.kind)
+	check("bomb_exploded" in kinds and "player_eliminated" in kinds and kinds[-1] == "round_ended", "results tick still carries explosion elimination and round end")
+	var view: Dictionary = JSON.parse_string(JSON.stringify(registry.game_view(room)))
+	check(view.players[0].elimination_cause.kind == "own_bomb", "snapshot retains elimination cause without replaying events")
+	check(int(view.event_cursor) == batch[-1].event_id, "game view cursor equals last emitted id")
+	check(registry.take_room_events(room).is_empty(), "results phase does not resend events")
+
+
+func test_event_cursor_late_join_and_reset() -> void:
+	var pair = event_room()
+	var registry = pair[0]
+	var room: Dictionary = pair[1]
+	registry.set_input(1, Vector2.ZERO, true)
+	registry.tick(0.016)
+	var cursor: int = registry.game_view(room).event_cursor
+	check(cursor == 1 and registry.room_view(room).event_cursor == 1, "room and game views expose current event cursor")
+	check(registry.join_room(9, room.code, "Late").ok, "late player joins")
+	check(registry.game_view(room).event_cursor == cursor, "late join initializes at the current cursor")
+	room.game.players[1].alive = false
+	room.game.resolve_round()
+	registry.tick(0.016)
+	registry.take_room_events(room)
+	check(registry.start_round(1), "rematch starts")
+	registry.tick(3.0)
+	check(room.game.event_counter == 0 and registry.game_view(room).event_cursor == 0 and registry.take_room_events(room).is_empty(), "rematch resets per-round event counter and batch")
+	registry.set_input(1, Vector2.ZERO, true)
+	registry.tick(0.016)
+	check(registry.take_room_events(room)[0].event_id == 1, "new round ids restart at one")
+
+
+func test_disconnect_expiry_event_and_cause() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	var created: Dictionary = registry.create_room(1, "A")
+	registry.join_room(2, created.code, "B")
+	registry.join_room(3, created.code, "C")
+	registry.start_round(1)
+	registry.tick(3.0)
+	var room: Dictionary = registry.rooms[created.code]
+	registry.take_room_events(room)
+	registry.leave(2)
+	registry.tick(29.0)
+	check(room.game.players[1].alive, "avatar survives grace")
+	registry.tick(1.5)
+	var out: Array = registry.take_room_events(room).filter(func(event): return event.kind == "player_eliminated" and event.player == 1)
+	check(out.size() == 1 and out[0].cause.kind == "disconnect", "disconnect expiry emits one elimination event")
+	check(JSON.parse_string(JSON.stringify(registry.game_view(room))).players[1].elimination_cause.kind == "disconnect", "disconnect cause appears in snapshot")
+	registry.tick(1.0)
+	check(registry.take_room_events(room).filter(func(event): return event.kind == "player_eliminated" and event.player == 1).is_empty(), "disconnect elimination is not repeated")
+
+
+func test_room_events_are_bounded() -> void:
+	var pair = event_room()
+	var registry = pair[0]
+	var room: Dictionary = pair[1]
+	for i in range(2000):
+		room.game.emit_event("bomb_placed", {"tile": [1, 1], "owner": 0})
+		registry.tick(0.001)
+	check(room.events.size() <= registry.MAX_ROOM_EVENTS, "undrained room batch stays bounded")
+	var batch: Array = registry.take_room_events(room)
+	check(batch[-1].event_id == 2000, "bounded batch keeps the newest events")

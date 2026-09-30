@@ -25,6 +25,9 @@ func run_checks(app) -> void:
 	check(RoomClient.resolve_server_url(PackedStringArray(["--server=wss://duck.example"]), "") == "wss://duck.example", "server URL reads --server argument")
 	check(RoomClient.resolve_server_url(PackedStringArray(["--server=ws://a"]), " wss://b ") == "wss://b", "web server parameter wins")
 	check(app.lobby.find_children("*", "LineEdit", true, false).size() == 2, "entry screen hides server URL")
+	test_ten_player_hud_bounds(app)
+	await test_owner_render_smoke(app)
+	await test_scrolling_roster(app)
 	test_game_arrives_before_room(app)
 	test_snapshot_geometry_round_trip(app)
 	test_authoritative_display_separation(app)
@@ -33,6 +36,8 @@ func run_checks(app) -> void:
 	test_local_player_marker_follows_person_slot(app)
 	test_spectator_has_no_player_marker(app)
 	test_shared_map_picker(app)
+	test_events_are_consumed_and_mute_is_available(app)
+	test_room_change_clears_transient_feedback(app)
 	var registry = RoomRegistry.new()
 	var result: Dictionary = registry.create_room(10, "Duck")
 	app.client.accept({"type": "joined", "person_id": result.person_id})
@@ -368,3 +373,108 @@ func test_shared_map_picker(app) -> void:
 	check(app.map_picker.visible and app.map_picker.selected_mode == "pond" and app.map_picker.can_select, "results opens same authoritative host picker")
 	app.client.accept({"type": "left"})
 	check(not app.map_picker.visible, "leaving closes picker")
+
+
+func test_ten_player_hud_bounds(app) -> void:
+	check(app.arena.has_method("player_card_rect"), "HUD exposes shared card geometry")
+	if not app.arena.has_method("player_card_rect"):
+		return
+	for count in range(7,11):
+		for i in range(count):
+			var rect: Rect2 = app.arena.player_card_rect(i,count)
+			check(rect.position.y == 82.0 + (i / 2)*112.0 and rect.size.y <= 108.0, "compact rows keep 112 px pitch and 108 px height")
+			check(rect.end.y <= 638.0 and rect.position.x >= 0 and rect.end.x <= 960, "seven to ten HUD cards clear footer")
+	for count in range(2,7):
+		check(app.arena.player_card_rect(0,count).size.y == (181.0 if count > 4 else 202.0), "existing larger HUD preserved")
+
+
+func test_owner_render_smoke(app) -> void:
+	var board = load("res://scripts/arena_board.gd").new()
+	root.add_child(board)
+	var game = load("res://scripts/arena_game.gd").new()
+	game.new_round()
+	while game.players.size() < 10:
+		game.players.append(game.players[0].duplicate(true))
+	for i in range(10):
+		game.players[i].avatar_id = 9-i
+	board.game = game
+	check(board.has_method("owner_color"), "flames use identity-aware bounded owner accents")
+	if board.has_method("owner_color"):
+		var catalog = load("res://scripts/character_catalog.gd")
+		check(board.owner_color(0) == catalog.appearance(9).palette.body, "flame tint follows avatar rather than slot")
+		check(board.owner_color(-1) == board.owner_color(99), "neutral and invalid owners use safe lethal tint")
+	board.show()
+	board.display_state = {}
+	for count in range(1,12):
+		game.flames.clear()
+		for owner in range(count):
+			game.flames.append({"tile": Vector2i(3,3), "owner": owner-1, "time": 0.5})
+		board.queue_redraw()
+		await process_frame
+	board.queue_free()
+
+
+func test_scrolling_roster(app) -> void:
+	var people := []
+	for i in range(18):
+		people.append({"id": i+1,"name": "LongDuckNameNumber%d" % i,"avatar_id": i%10,"slot": -1,"connected": i<10,"wins": 0,"kills": 0})
+	app.client.person_id = 1
+	app.client.accept({"type": "room","code": "ABCDEF","host": 1,"phase": "lobby","round_id": 100,"wall_mode": "fixed","people": people})
+	await process_frame
+	await process_frame
+	var scroll = app.lobby.find_child("RosterScroll",true,false)
+	check(scroll != null, "waiting roster scrolls")
+	if scroll != null:
+		check(scroll.get_v_scroll_bar().max_value > scroll.size.y, "ten plus offline history overflows inside scroll")
+	check(app.leave_button.get_global_rect().end.y <= 634, "long roster keeps room controls above footer")
+	check(app.start_button.get_global_rect().end.y < app.leave_button.get_global_rect().position.y, "start remains above leave")
+	app.client.accept({"type":"left"})
+
+
+func start_two_player_round(app, guest_view := true) -> Dictionary:
+	var registry = RoomRegistry.new()
+	var created: Dictionary = registry.create_room(1, "Host")
+	var joined: Dictionary = registry.join_room(2, created.code, "Guest")
+	registry.start_round(1)
+	app.client.accept({"type": "joined", "person_id": joined.person_id if guest_view else created.person_id})
+	var room: Dictionary = registry.room_for_peer(1)
+	app.client.accept(registry.room_view(room))
+	app.client.accept(registry.game_view(room))
+	return {"registry": registry, "room": room}
+
+
+func test_events_are_consumed_and_mute_is_available(app) -> void:
+	var mute = app.find_child("MuteButton", true, false)
+	check(mute != null and mute.visible and mute.focus_mode == Control.FOCUS_NONE, "visible mute control that does not take keyboard focus")
+	check(app.arena.get("feedback") != null, "arena owns feedback state")
+	if app.arena.get("feedback") == null:
+		return
+	app.arena.feedback.persist = false
+	app.arena.feedback.unlocked = true
+	var setup := start_two_player_round(app)
+	var room: Dictionary = setup.room
+	room.game.place_bomb(0)
+	app.client.accept({"type": "events", "round_id": room.round_id, "events": room.game.take_events()})
+	check(app.arena.feedback.cues.has("place"), "events message reaches feedback once room state matches")
+	var count: int = app.arena.feedback.cues.size()
+	app.client.accept({"type": "events", "round_id": room.round_id, "events": [{"event_id": 1, "kind": "bomb_placed", "tile": [1, 1], "owner": 0, "elapsed": 0.0}]})
+	check(app.arena.feedback.cues.size() == count, "client dedupe plus feedback dedupe avoid replay")
+	mute.pressed.emit()
+	check(app.arena.feedback.muted, "mute button toggles feedback")
+	app.client.accept({"type": "events", "round_id": room.round_id, "events": [{"event_id": 50, "kind": "player_eliminated", "player": 1, "tile": [3, 3], "cause": {"kind": "own_bomb", "owner": 1}, "elapsed": 1.0}]})
+	check(app.arena.feedback.personal_cause.begins_with("OUT") and app.arena.feedback.cues.size() == count, "muted personal elimination keeps text without sound")
+	mute.pressed.emit()
+	check(not app.arena.feedback.muted, "mute toggles back")
+	app.client.accept({"type": "left"})
+
+
+func test_room_change_clears_transient_feedback(app) -> void:
+	if app.arena.get("feedback") == null:
+		check(false, "arena owns feedback state")
+		return
+	app.arena.feedback.persist = false
+	start_two_player_round(app)
+	app.client.accept({"type": "events", "round_id": app.client.game.round_id, "events": [{"event_id": 60, "kind": "player_eliminated", "player": 1, "tile": [3, 3], "cause": {"kind": "flood", "owner": -1}, "elapsed": 1.0}]})
+	check(not app.arena.feedback.personal_cause.is_empty(), "personal cause set before leaving")
+	app.client.accept({"type": "left"})
+	check(app.arena.feedback.personal_cause.is_empty() and app.arena.feedback.effects.is_empty() and app.arena.feedback.round_id == -1, "leaving a room clears transient feedback")

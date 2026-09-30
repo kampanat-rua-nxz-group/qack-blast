@@ -36,7 +36,7 @@ func run_checks(results) -> void:
 	var names := []
 	for row in rows.get_children():
 		names.append(row.get_node("Name").text)
-	check(names == ["Leader", "Offline (offline)", "Host (host)", "Tie A (offline)", "Tie B (offline)", "Another (offline)", "Late"], "leaderboard sorts wins, kills, then roster order")
+	check(names == ["Leader", "Offline (offline)", "Host (YOU) (host)", "Tie A (offline)", "Tie B (offline)", "Another (offline)", "Late"], "leaderboard sorts wins, kills, then roster order")
 	var first_row = rows.get_child(0)
 	results.present(room, {"round_over": false, "result": "PLAYER 1 WINS"}, 1)
 	check(rows.get_child(0) == first_row, "unchanged roster keeps leaderboard rows stable")
@@ -58,7 +58,9 @@ func run_checks(results) -> void:
 	room.people.append({"id": 8, "name": "New Duck", "connected": true, "wins": 0, "kills": 0})
 	results.present(room, {"round_over": true, "result": "DRAW"}, 2)
 	check(rows.get_child_count() == 8 and not results.find_child("PlayAgainButton", true, false).disabled, "late join updates leaderboard and replay availability")
+	await test_ten_active_with_full_history(results)
 	test_long_winner_remains_readable(results, room)
+	test_personal_elimination_note_survives_result_race(results)
 	finish()
 
 
@@ -81,3 +83,67 @@ func check(condition: bool, message: String) -> void:
 func finish() -> void:
 	print("Results UI checks: %d failure(s)" % failures)
 	quit(1 if failures else 0)
+
+
+func test_ten_active_with_full_history(results) -> void:
+	var people := []
+	for i in range(16):
+		people.append({"id": i+1,"name": "FullHistoricalNickname%d" % i,"connected": i<10,"avatar_id": i%10,"wins": i,"kills": 16-i})
+	var room := {"code":"QACK42","host": 1,"wall_mode":"fixed","phase":"results","people": people}
+	results.present(room,{"round_over":true,"result":"DRAW"},3)
+	await process_frame
+	await process_frame
+	check(results.leaderboard_rows.get_child_count() == 16, "ten active plus offline history retained")
+	var markers := 0
+	for row in results.leaderboard_rows.get_children():
+		if row.get_node("Name").text.contains("YOU"):
+			markers += 1
+		check(row.get_node_or_null("Portrait") != null, "every historical result has shared portrait")
+		check(not row.get_node("Name").tooltip_text.is_empty(), "full historical names available")
+	check(markers == 1, "results identify exactly one local participant")
+	check(results.leaderboard_rows.get_child(0).get_node("Wins").text == "15", "full history keeps rank ordering")
+	check(results.find_child("PlayAgainButton",true,false).get_global_rect().end.y <= 644, "results controls clear footer with history")
+
+
+func note_room() -> Dictionary:
+	return {"code": "QACK42", "host": 1, "wall_mode": "fixed", "phase": "results", "people": [
+		{"id": 1, "name": "Ann", "slot": 0, "connected": true, "wins": 1, "kills": 0},
+		{"id": 2, "name": "Bo", "slot": 1, "connected": true, "wins": 0, "kills": 1},
+		{"id": 3, "name": "Late", "slot": -1, "connected": true, "wins": 0, "kills": 0},
+	]}
+
+
+func note_game(result: String, cause: Dictionary) -> Dictionary:
+	return {"round_over": true, "result": result, "players": [
+		{"alive": result == "PLAYER 1 WINS", "elimination_cause": {}},
+		{"alive": false, "elimination_cause": cause},
+	]}
+
+
+func test_personal_elimination_note_survives_result_race(results) -> void:
+	var room := note_room()
+	var note: Label = results.find_child("PersonalNote", true, false)
+	check(note != null, "results have a personal note label")
+	if note == null:
+		return
+	var cause := {"kind": "other_bomb", "owner": 0}
+	# Loss: cause comes from the snapshot alone.
+	results.present(room, note_game("PLAYER 1 WINS", cause), 2)
+	check(note.visible and note.text.begins_with("OUT") and note.text.contains("Ann"), "loser sees personal cause from snapshot")
+	check(not note.text.to_upper().contains("YOU LOSE") and not note.text.to_upper().contains("KILLED BY"), "no false outcome or credited killer wording")
+	# Results phase arrives before the final game snapshot: event text bridges the gap.
+	results.present(room, {}, 2, "OUT: Ann's blast")
+	check(note.visible and note.text == "OUT: Ann's blast", "event cause persists when game state is not yet present")
+	results.present(room, note_game("PLAYER 1 WINS", cause), 2, "OUT: Ann's blast")
+	check(note.text.begins_with("OUT"), "final game message keeps the cause")
+	# Win: no elimination text, no loss wording.
+	results.present(room, note_game("PLAYER 1 WINS", cause), 1)
+	check(note.visible and note.text.to_upper().contains("WON") and not note.text.begins_with("OUT"), "winner sees a win note")
+	# Draw: eliminated player still sees why they were out.
+	results.present(room, note_game("DRAW", {"kind": "ambiguous_blasts", "owner": -1}), 2)
+	check(note.text.begins_with("OUT"), "draw keeps personal cause")
+	# Spectator: no personal outcome at all.
+	results.present(room, note_game("PLAYER 1 WINS", cause), 3, "OUT: stale")
+	check(not note.visible or note.text.is_empty(), "spectator has no personal outcome or cause")
+	results.present(room, {}, 3)
+	check(not note.visible or note.text.is_empty(), "spectator without game has no note")

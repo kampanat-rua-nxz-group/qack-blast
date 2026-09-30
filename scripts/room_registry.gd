@@ -1,9 +1,11 @@
 extends RefCounted
 
 const ArenaGame = preload("res://scripts/arena_game.gd")
+const CharacterCatalog = preload("res://scripts/character_catalog.gd")
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 const MAX_CONNECTED = 6
 const DISCONNECT_GRACE = 30.0
+const MAX_ROOM_EVENTS = 256
 
 var rng := RandomNumberGenerator.new()
 var rooms: Dictionary = {}
@@ -15,7 +17,7 @@ func create_room(peer_id: int, nickname: String) -> Dictionary:
 	if peer_rooms.has(peer_id):
 		return {"ok": false, "error": "Already in a room"}
 	var code := make_code()
-	rooms[code] = {"code": code, "host": 0, "people": [], "phase": "lobby", "countdown_remaining": 0.0, "notice": "", "round_id": 0, "snapshot_seq": 0, "wall_mode": "fixed", "game": null, "lineup": [], "directions": [], "plants": [], "move_presses": [], "input_remaining": []}
+	rooms[code] = {"code": code, "host": 0, "people": [], "phase": "lobby", "countdown_remaining": 0.0, "notice": "", "round_id": 0, "snapshot_seq": 0, "wall_mode": "fixed", "game": null, "events": [], "lineup": [], "directions": [], "plants": [], "move_presses": [], "input_remaining": []}
 	return join_room(peer_id, code, nickname)
 
 
@@ -43,13 +45,24 @@ func join_room(peer_id: int, code: String, nickname: String) -> Dictionary:
 	while used.has(name):
 		name = "%s#%d" % [base, suffix]
 		suffix += 1
-	var person := {"id": next_person_id, "peer": peer_id, "name": name, "scores": {"wins": 0, "kills": 0}, "slot": -1, "disconnect_remaining": 0.0}
+	var person := {"id": next_person_id, "peer": peer_id, "name": name, "scores": {"wins": 0, "kills": 0}, "slot": -1, "disconnect_remaining": 0.0, "avatar_id": available_avatar(room)}
 	next_person_id += 1
 	room.people.append(person)
 	peer_rooms[peer_id] = code
 	if room.host == 0:
 		room.host = person.id
 	return {"ok": true, "code": code, "person_id": person.id, "name": name}
+
+
+func available_avatar(room: Dictionary) -> int:
+	var reserved := {}
+	for person in room.people:
+		if person.peer != 0 or (room.phase in ["countdown", "playing"] and person.id in room.lineup):
+			reserved[person.get("avatar_id", -1)] = true
+	for avatar_id in range(10):
+		if not reserved.has(avatar_id):
+			return avatar_id
+	return -1
 
 
 func leave(peer_id: int) -> void:
@@ -99,6 +112,9 @@ func start_round(peer_id: int) -> bool:
 		person.slot = -1
 	if connected.size() < 2 or connected.size() > MAX_CONNECTED:
 		return false
+	for person in connected:
+		if person.avatar_id < 0:
+			person.avatar_id = available_avatar(room)
 	room.lineup = []
 	room.directions = []
 	room.plants = []
@@ -121,7 +137,10 @@ func start_round(peer_id: int) -> bool:
 		game.scores.append(person.scores)
 	room.round_id += 1
 	game.new_round()
+	for i in range(connected.size()):
+		game.players[i]["avatar_id"] = connected[i].avatar_id
 	room.game = game
+	room.events.clear()
 	room.phase = "countdown"
 	room.countdown_remaining = 3.0
 	room.notice = ""
@@ -186,8 +205,11 @@ func tick(delta: float) -> void:
 			if person.peer == 0 and person.slot >= 0 and person.disconnect_remaining > 0.0:
 				person.disconnect_remaining -= play_delta
 				if person.disconnect_remaining <= 0.0:
-					room.game.players[person.slot].alive = false
+					room.game.eliminate_disconnected(person.slot)
 		room.game.step(play_delta, room.directions, room.plants, room.move_presses)
+		room.events.append_array(room.game.take_events())
+		if room.events.size() > MAX_ROOM_EVENTS:
+			room.events = room.events.slice(room.events.size() - MAX_ROOM_EVENTS)
 		room.move_presses.fill(Vector2.ZERO)
 		for i in range(room.plants.size()):
 			room.plants[i] = false
@@ -195,6 +217,16 @@ func tick(delta: float) -> void:
 			room.phase = "results"
 			for i in range(room.directions.size()):
 				room.directions[i] = Vector2.ZERO
+
+
+func take_room_events(room: Dictionary) -> Array:
+	var events: Array = room.events
+	room.events = []
+	return events
+
+
+func event_cursor(room: Dictionary) -> int:
+	return room.game.event_counter if room.game != null else 0
 
 
 func room_for_peer(peer_id: int) -> Dictionary:
@@ -213,8 +245,8 @@ func person_for_peer(room: Dictionary, peer_id: int) -> Dictionary:
 func room_view(room: Dictionary) -> Dictionary:
 	var people := []
 	for person in room.people:
-		people.append({"id": person.id, "name": person.name, "connected": person.peer != 0, "slot": person.slot, "wins": person.scores.wins, "kills": person.scores.kills})
-	return {"type": "room", "code": room.code, "host": room.host, "phase": room.phase, "countdown_remaining": room.countdown_remaining, "notice": room.notice, "round_id": room.round_id, "wall_mode": room.wall_mode, "people": people}
+		people.append({"id": person.id, "name": person.name, "connected": person.peer != 0, "slot": person.slot, "avatar_id": person.avatar_id, "wins": person.scores.wins, "kills": person.scores.kills})
+	return {"type": "room", "code": room.code, "host": room.host, "phase": room.phase, "countdown_remaining": room.countdown_remaining, "notice": room.notice, "round_id": room.round_id, "event_cursor": event_cursor(room), "wall_mode": room.wall_mode, "people": people}
 
 
 func game_view(room: Dictionary) -> Dictionary:
@@ -224,7 +256,7 @@ func game_view(room: Dictionary) -> Dictionary:
 	for i in range(game.players.size()):
 		var player: Dictionary = game.players[i]
 		var target: Vector2 = game.move_targets[i]
-		players.append({"pos": [player.pos.x, player.pos.y], "move_target": [target.x, target.y], "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.speed_bonus, "can_kick": player.can_kick, "facing": player.facing})
+		players.append({"pos": [player.pos.x, player.pos.y], "move_target": [target.x, target.y], "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.speed_bonus, "can_kick": player.can_kick, "facing": player.facing, "avatar_id": player.get("avatar_id", i), "elimination_cause": player.get("elimination_cause", {}).duplicate(true)})
 	var bombs := []
 	for bomb in game.bombs:
 		var kick_direction: Vector2i = bomb.get("kick_direction", Vector2i.ZERO)
@@ -241,7 +273,7 @@ func game_view(room: Dictionary) -> Dictionary:
 		for tile in hazard.tiles:
 			tiles.append([tile.x, tile.y])
 		hazards.append({"kind": hazard.kind, "tiles": tiles, "time": hazard.time})
-	return {"type": "game", "round_id": room.round_id, "snapshot_seq": room.snapshot_seq, "geometry": {"width": game.WIDTH, "height": game.HEIGHT, "cell": game.CELL, "origin": [game.ORIGIN.x, game.ORIGIN.y]}, "board": game.board, "terrain": game.terrain, "players": players, "bombs": bombs, "hazards": hazards, "flames": flames, "pickups": pickups, "scores": game.scores, "round_elapsed": game.round_elapsed, "round_over": game.round_over, "result": game.result, "wall_mode": game.wall_mode}
+	return {"type": "game", "round_id": room.round_id, "snapshot_seq": room.snapshot_seq, "event_cursor": game.event_counter, "geometry": {"width": game.WIDTH, "height": game.HEIGHT, "cell": game.CELL, "origin": [game.ORIGIN.x, game.ORIGIN.y]}, "board": game.board, "terrain": game.terrain, "players": players, "bombs": bombs, "hazards": hazards, "flames": flames, "pickups": pickups, "scores": game.scores, "round_elapsed": game.round_elapsed, "round_over": game.round_over, "result": game.result, "wall_mode": game.wall_mode}
 
 
 func make_code() -> String:
