@@ -3,6 +3,9 @@ extends Control
 signal change_map_requested
 signal play_again_requested
 signal leave_requested
+signal bot_add_requested
+signal bot_remove_requested(person_id: int)
+signal bot_difficulty_requested(person_id: int, difficulty: String)
 
 const ArenaGame = preload("res://scripts/arena_game.gd")
 const LobbyArt = preload("res://scripts/lobby_art.gd")
@@ -18,6 +21,8 @@ var feedback: String = ""
 var displayed_people: Array = []
 var displayed_host := -1
 var displayed_person_id := -1
+var displayed_phase := ""
+var current_phase := "results"
 var room_code_label: Label
 var outcome_label: Label
 var personal_note_label: Label
@@ -26,6 +31,7 @@ var status_label: Label
 var leaderboard_rows: VBoxContainer
 var map_button: Button
 var replay_button: Button
+var bot_add_button: Button
 
 
 func _ready() -> void:
@@ -107,10 +113,15 @@ func _ready() -> void:
 	leave_button.pressed.connect(func(): leave_requested.emit())
 	for button in actions.get_children():
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bot_add_button = Ui.button(actions, "ADD BOT", 40, Color("e7f2ed"), Color("366b68"))
+	bot_add_button.name = "AddBotButton"
+	bot_add_button.pressed.connect(func(): bot_add_requested.emit())
+	bot_add_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 
 func present(room: Dictionary, game: Dictionary, person_id: int, personal_note: String = "") -> void:
 	room_code = str(room.get("code", ""))
+	current_phase = str(room.get("phase", "results"))
 	room_code_label.text = room_code
 	map_label.text = "MAP: %s" % ArenaGame.MAP_NAMES.get(room.get("wall_mode", "fixed"), "Classic")
 	var people: Array = room.get("people", [])
@@ -121,18 +132,25 @@ func present(room: Dictionary, game: Dictionary, person_id: int, personal_note: 
 		outcome_size -= 1
 	outcome_label.add_theme_font_size_override("font_size", outcome_size)
 	var connected_count := 0
+	var has_bot := false
 	for person in people:
 		if person.connected:
 			connected_count += 1
-	if people != displayed_people or room.host != displayed_host or person_id != displayed_person_id:
+		if person.get("kind", "human") == "bot":
+			has_bot = true
+	var ready_count: int = int(room.get("ready_player_count", connected_count))
+	if people != displayed_people or room.host != displayed_host or person_id != displayed_person_id or current_phase != displayed_phase:
 		_render_leaderboard(people, room.host, person_id)
 		displayed_people = people.duplicate(true)
 		displayed_host = room.host
 		displayed_person_id = person_id
+		displayed_phase = current_phase
 	var host: bool = room.host == person_id
 	map_button.disabled = room.get("phase", "results") not in ["lobby", "results"]
-	replay_button.disabled = not host or connected_count < 2
-	status_label.text = feedback if not feedback.is_empty() else "Choose a map or play again." if host else "Waiting for the host to start the next round."
+	replay_button.disabled = not host or ready_count < 2 or room.get("phase", "results") not in ["lobby", "results"]
+	bot_add_button.visible = host and not has_bot
+	bot_add_button.disabled = not host or room.get("phase", "results") not in ["lobby", "results"] or has_bot or ready_count >= 10
+	status_label.text = feedback if not feedback.is_empty() else "Choose a map, manage your bot, or play again." if host else "Waiting for the host to start the next round."
 
 
 func _show_personal_note(text: String) -> void:
@@ -186,11 +204,15 @@ func _render_leaderboard(people: Array, host_id: int, person_id: int) -> void:
 	for i in range(entries.size()):
 		var person: Dictionary = entries[i].person
 		var name: String = str(person.name)
+		var is_bot: bool = person.get("kind", "human") == "bot"
+		if is_bot:
+			name = "BOT · %s (%s)" % [person.name, _difficulty_label(person.get("difficulty", "medium"))]
 		if person.id == person_id:
-			name += " (YOU)"
+			if not is_bot:
+				name += " (YOU)"
 		if person.id == host_id:
 			name += " (host)"
-		if not person.connected:
+		if not person.connected and not is_bot:
 			name += " (offline)"
 		var row := HBoxContainer.new()
 		row.name = "ScoreRow"
@@ -203,6 +225,37 @@ func _render_leaderboard(people: Array, host_id: int, person_id: int) -> void:
 		var badge := _text(row,look.badge,"Badge",14,Ui.NAVY)
 		badge.custom_minimum_size.x = 18
 		row.move_child(badge,2)
+		if is_bot:
+			var selector := _bot_difficulty(person.get("difficulty", "medium"))
+			selector.name = "BotDifficulty"
+			selector.custom_minimum_size.x = 112
+			selector.disabled = person_id != host_id or room_phase_not_mutable()
+			selector.item_selected.connect(func(index: int, id: int = int(person.id)): bot_difficulty_requested.emit(id, selector.get_item_metadata(index)))
+			row.add_child(selector)
+			var remove := Ui.button(row, "REMOVE", 32, Color("f9e8ed"), Color("92536b"))
+			remove.name = "RemoveBotButton"
+			remove.disabled = selector.disabled
+			remove.visible = person_id == host_id
+			remove.pressed.connect(func(id: int = int(person.id)): bot_remove_requested.emit(id))
+
+
+func room_phase_not_mutable() -> bool:
+	return not (current_phase in ["lobby", "results"])
+
+
+func _bot_difficulty(difficulty: String) -> OptionButton:
+	var selector := OptionButton.new()
+	for entry in [["Easy", "easy"], ["Medium", "medium"], ["Hard", "hard"], ["Extreme", "extreme"]]:
+		var index := selector.item_count
+		selector.add_item(entry[0])
+		selector.set_item_metadata(index, entry[1])
+		if entry[1] == difficulty:
+			selector.select(index)
+	return selector
+
+
+func _difficulty_label(difficulty: String) -> String:
+	return {"easy": "Easy", "medium": "Medium", "hard": "Hard", "extreme": "Extreme"}.get(difficulty, "Medium")
 
 
 func show_error(message: String) -> void:

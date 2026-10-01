@@ -133,7 +133,57 @@ func run_checks(app) -> void:
 	app.client.accept({"type": "left"})
 	check(app.lobby.visible and not app.arena.visible and not app.results.visible and app.entry_card.visible, "leaving returns to room entry")
 	test_rejoin_preserves_code_without_resuming_identity(app)
+	await test_bot_lobby_controls(app)
 	finish()
+
+
+func test_bot_lobby_controls(app) -> void:
+	var registry = RoomRegistry.new()
+	var created: Dictionary = registry.create_room(10, "Solo")
+	app.client.accept({"type": "joined", "person_id": created.person_id})
+	var room: Dictionary = registry.rooms[created.code]
+	app.client.accept(registry.room_view(room))
+	var add_button := app.lobby.find_child("AddBotButton", true, false) as Button
+	check(add_button != null and add_button.visible and not add_button.disabled, "host can add bot in lobby")
+	check(add_button.text.contains("MEDIUM") and add_button.pressed.get_connections().size() == 1, "lobby add requests the default Medium bot")
+	registry.add_bot(10)
+	app.client.accept(registry.room_view(room))
+	var bot_row: Control = app.roster_rows.get_children().back()
+	check(bot_row.find_child("BotDifficulty", true, false) != null and bot_row.find_child("RemoveBotButton", true, false) != null, "bot row exposes difficulty and remove controls")
+	var bot_label: Label = bot_row.find_child("RosterName", true, false)
+	check(bot_label.text.contains("BOT") and bot_label.text.contains("Medium") and not bot_label.text.contains("offline"), "lobby bot label shows its difficulty instead of offline")
+	var selector := bot_row.find_child("BotDifficulty", true, false) as OptionButton
+	await process_frame
+	await process_frame
+	var status_card: Control = app.lobby.find_child("StatusCard", true, false)
+	var remove_control: Control = bot_row.find_child("RemoveBotButton", true, false)
+	check(selector.size.x >= 112.0 and remove_control.get_global_rect().end.x <= status_card.get_global_rect().end.x, "bot controls fit the lobby column and keep selector labels readable")
+	var labels: Array = []
+	var ids: Array = []
+	if selector != null:
+		for index in range(selector.item_count):
+			labels.append(selector.get_item_text(index))
+			ids.append(selector.get_item_metadata(index))
+	check(labels == ["Easy", "Medium", "Hard", "Extreme"] and ids == ["easy", "medium", "hard", "extreme"], "bot difficulty choices use canonical identifiers")
+	check(not app.start_button.disabled, "one connected human plus bot uses ready count to enable solo start")
+	registry.start_round(10)
+	app.client.accept(registry.room_view(room))
+	var current_row: Control = app.roster_rows.get_children().back()
+	var current_selector := current_row.find_child("BotDifficulty", true, false) as OptionButton
+	var remove_button := current_row.find_child("RemoveBotButton", true, false) as Button
+	check(add_button.disabled and current_selector.disabled and remove_button.disabled, "bot controls disable during countdown")
+	current_selector.grab_focus()
+	registry.tick(3.1)
+	app.client.accept(registry.room_view(room))
+	check(current_selector.disabled and app.get_viewport().gui_get_focus_owner() == null, "play disables bot controls and releases keyboard focus")
+	app.client.accept({"type": "left"})
+	app.client.accept({"type": "joined", "person_id": 1})
+	app.client.accept({"type": "room", "code": "OLD123", "host": 1, "phase": "lobby", "round_id": 0, "wall_mode": "fixed", "people": [
+		{"id": 1, "name": "Solo", "connected": true, "slot": -1},
+		{"id": 2, "name": "Friend", "connected": true, "slot": -1},
+	]})
+	check(not app.start_button.disabled, "old room snapshots fall back to connected-human readiness")
+	app.client.accept({"type": "left"})
 
 
 func test_connection_ui(app) -> void:

@@ -41,6 +41,7 @@ func run_checks(results) -> void:
 	results.present(room, {"round_over": false, "result": "PLAYER 1 WINS"}, 1)
 	check(rows.get_child(0) == first_row, "unchanged roster keeps leaderboard rows stable")
 	check(not results.find_child("ChangeMapButton", true, false).disabled and not results.find_child("PlayAgainButton", true, false).disabled, "host can change map and replay")
+	test_bot_results_replay(results)
 	var copy_button = results.find_child("CopyCodeButton", true, false)
 	check(copy_button != null, "results have copy code button")
 	copy_button.pressed.emit()
@@ -62,6 +63,49 @@ func run_checks(results) -> void:
 	test_long_winner_remains_readable(results, room)
 	test_personal_elimination_note_survives_result_race(results)
 	finish()
+
+
+func test_bot_results_replay(results) -> void:
+	var room := {"code": "BOT777", "host": 1, "wall_mode": "fixed", "phase": "results", "ready_player_count": 2, "people": [
+		{"id": 1, "name": "Solo", "slot": 0, "connected": true, "kind": "human", "wins": 1, "kills": 0},
+		{"id": 2, "name": "Bot", "slot": 1, "connected": false, "kind": "bot", "difficulty": "hard", "wins": 0, "kills": 2},
+	]}
+	results.present(room, {"round_over": true, "result": "PLAYER 1 WINS"}, 1)
+	var rows = results.find_child("LeaderboardRows", true, false)
+	check(rows.get_child(1).get_node("Name").text.contains("BOT") and rows.get_child(1).get_node("Name").text.contains("Hard") and not rows.get_child(1).get_node("Name").text.contains("offline"), "results labels bot with difficulty instead of offline")
+	check(not results.find_child("PlayAgainButton", true, false).disabled, "one human plus ready bot enables play again")
+	check(results.has_signal("bot_add_requested") and results.has_signal("bot_remove_requested") and results.has_signal("bot_difficulty_requested"), "results exposes bot management signals")
+	results.present(room, {"round_over": true, "result": "PLAYER 1 WINS"}, 99)
+	check(results.find_child("RemoveBotButton", true, false).visible == false and results.find_child("BotDifficulty", true, false).disabled and results.find_child("PlayAgainButton", true, false).disabled, "guest cannot manage the bot or replay")
+	results.present(room, {"round_over": true, "result": "PLAYER 1 WINS"}, 1)
+	var add_requests := []
+	var remove_requests := []
+	var difficulty_requests := []
+	results.bot_add_requested.connect(func(): add_requests.append(true))
+	results.bot_remove_requested.connect(func(id): remove_requests.append(id))
+	results.bot_difficulty_requested.connect(func(id, difficulty): difficulty_requests.append([id, difficulty]))
+	var add_button := results.find_child("AddBotButton", true, false) as Button
+	var remove_button := results.find_child("RemoveBotButton", true, false) as Button
+	var selector := results.find_child("BotDifficulty", true, false) as OptionButton
+	check(add_button != null and remove_button != null and selector != null, "results exposes bot controls")
+	check(selector != null and selector.custom_minimum_size.x >= 112.0 and results.find_child("AddBotButton", true, false).get_global_rect().end.x <= results.find_child("ResultsCard", true, false).get_global_rect().end.x, "results bot controls fit the 960 by 720 card")
+	if add_button != null and remove_button != null and selector != null:
+		add_button.pressed.emit()
+		remove_button.pressed.emit()
+		selector.select(3)
+		selector.item_selected.emit(3)
+	check(add_requests.size() == 1 and remove_requests == [2] and difficulty_requests == [[2, "extreme"]], "results bot controls emit target IDs and canonical difficulty")
+	room.people[1].difficulty = "extreme"
+	results.present(room, {"round_over": true, "result": "PLAYER 1 WINS"}, 1)
+	check(add_requests.size() == 1 and remove_requests == [2] and difficulty_requests == [[2, "extreme"]], "snapshot difficulty updates do not emit another request")
+	room.phase = "playing"
+	results.present(room, {}, 1)
+	var playing_remove := results.find_child("RemoveBotButton", true, false) as Button
+	var playing_selector := results.find_child("BotDifficulty", true, false) as OptionButton
+	check(add_button.disabled and playing_remove.disabled and playing_selector.disabled and results.find_child("PlayAgainButton", true, false).disabled, "results mutations disable during play")
+	var old_snapshot := {"code": "OLD123", "host": 1, "phase": "results", "people": [{"id": 1, "name": "Solo", "connected": true, "wins": 0, "kills": 0}, {"id": 3, "name": "Friend", "connected": true, "wins": 0, "kills": 0}]}
+	results.present(old_snapshot, {"round_over": true, "result": "DRAW"}, 1)
+	check(not results.find_child("PlayAgainButton", true, false).disabled, "old snapshots fall back to connected-human count without errors")
 
 
 func test_long_winner_remains_readable(results, room: Dictionary) -> void:
