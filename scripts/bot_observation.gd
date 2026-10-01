@@ -53,6 +53,10 @@ static func capture(game, slot: int, memory: Dictionary) -> Dictionary:
 				break
 		if matched:
 			continue
+		# Current visibility disproves a remembered bomb at its old tile. Without
+		# this check, a visible kicked bomb leaves a phantom beside its live copy.
+		if visible(game, own, game.center(remembered.tile)):
+			continue
 		var remaining: float = remembered.time - (game.round_elapsed - remembered.last_observed)
 		if remaining + FLAME_TIME > 0.0:
 			seen.append(remembered.duplicate(true))
