@@ -8,6 +8,7 @@ func _initialize() -> void:
 	test_observation_detached()
 	test_night_visibility_boundary()
 	test_night_memory_shuffle()
+	test_visible_kicked_bomb_retires_old_memory()
 	test_observation_hidden_state_independence()
 	test_chain_forecast()
 	test_same_batch_crate_forecast()
@@ -187,6 +188,21 @@ func test_observation_hidden_state_independence() -> void:
 	check(o.bombs.size() == 1 and o.bombs[0].time < 0.0, "remember bomb through projected flame lifetime")
 	a.round_elapsed = 1.61
 	check(observation(a, memory).bombs.is_empty(), "retire bomb after projected blast lifetime")
+
+
+func test_visible_kicked_bomb_retires_old_memory() -> void:
+	var game = observation_game("frost")
+	var memory := {}
+	var origin := Vector2i(3, 3)
+	var destination := Vector2i(4, 3)
+	game.bombs = [{"tile": origin, "owner": 1, "range": 2, "time": 2.0, "danger": false,
+		"kick_direction": Vector2i.RIGHT, "kick_progress": 0.0}]
+	observation(game, memory)
+	game.bombs[0].tile = destination
+	game.bombs[0].kick_progress = 0.2
+	var o := observation(game, memory)
+	check(o.bombs.size() == 1 and o.bombs[0].tile == destination,
+		"visible vacated tile retires old kicked-bomb memory")
 
 
 func navigation():
