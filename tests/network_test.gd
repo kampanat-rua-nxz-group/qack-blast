@@ -17,6 +17,7 @@ var frozen_positions: Array = []
 func _initialize() -> void:
 	test_input_commands()
 	test_client_event_handling()
+	test_bot_protocol_validation()
 	if failures:
 		quit(1)
 		return
@@ -41,7 +42,7 @@ func _process(delta: float) -> bool:
 			if message is Dictionary:
 				inbox[i].append(message)
 	elapsed += delta
-	if elapsed > 8.0:
+	if elapsed > 20.0:
 		fail("network handshake timed out at phase %d" % phase)
 		return false
 	match phase:
@@ -113,6 +114,46 @@ func _process(delta: float) -> bool:
 					if message.message != "Already in a room":
 						fail("late gameplay input shows an error on results: %s" % message.message)
 						return false
+					request(1, {"type": "leave"})
+					request(0, {"type": "bot_add", "difficulty": "medium"})
+					inbox[0].clear()
+					phase = 6
+					break
+		6:
+			for message in inbox[0]:
+				if message.get("type") == "room" and message.ready_player_count == 2 and message.people.back().kind == "bot":
+					var bot: Dictionary = message.people.back()
+					check(bot.kind == "bot" and not bot.connected and bot.difficulty == "medium", "WebSocket bot add returns authoritative metadata")
+					request(0, {"type": "start"})
+					inbox[0].clear()
+					phase = 7
+					break
+		7:
+			var solo_room: Dictionary = server.registry.rooms[room_code]
+			if solo_room.phase == "countdown":
+				check(solo_room.game.round_elapsed == 0.0, "loopback solo countdown freezes game clock")
+				return false
+			if solo_room.phase == "playing":
+				var bot_person: Dictionary = solo_room.people.back()
+				check(solo_room.game.players.size() == 2 and bot_person.peer == 0, "solo loopback starts two-player game without bot socket")
+				solo_room.game.players[bot_person.slot].alive = false
+				solo_room.game.resolve_round()
+				server.registry.tick(0.0)
+				request(0, {"type": "bot_difficulty", "person_id": bot_person.id, "difficulty": "extreme"})
+				inbox[0].clear()
+				phase = 8
+		8:
+			for message in inbox[0]:
+				if message.get("type") == "room" and message.phase == "results" and message.people.back().difficulty == "extreme":
+					request(0, {"type": "start"})
+					inbox[0].clear()
+					phase = 9
+					break
+		9:
+			for message in inbox[0]:
+				if message.get("type") == "room" and message.phase == "countdown" and message.round_id == 3:
+					var solo_room: Dictionary = server.registry.rooms[room_code]
+					check(solo_room.game.player_count == 2 and solo_room.people.back().difficulty == "extreme", "solo replay preserves bot identity and chosen difficulty")
 					print("Network checks: %d failure(s)" % failures)
 					server.socket.close()
 					for client in clients:
@@ -120,6 +161,28 @@ func _process(delta: float) -> bool:
 					quit(1 if failures else 0)
 					break
 	return false
+
+
+func test_bot_protocol_validation() -> void:
+	var test_server = RoomServer.new()
+	var registry = test_server.registry
+	var created: Dictionary = registry.create_room(10, "Host")
+	registry.join_room(20, created.code, "Guest")
+	var room: Dictionary = registry.rooms[created.code]
+	var before_people: Array = room.people.duplicate(true)
+	for bad_difficulty in [1, true, "unknown"]:
+		var result: Dictionary = test_server.dispatch_bot_message(10, {"type": "bot_add", "difficulty": bad_difficulty})
+		check(not result.ok and room.people == before_people, "invalid difficulty rejected without mutation")
+	check(not test_server.dispatch_bot_message(20, {"type": "bot_add", "difficulty": "medium"}).ok, "guest bot command is rejected")
+	check(test_server.dispatch_bot_message(10, {"type": "bot_add", "difficulty": "medium"}).ok, "host bot add command accepted")
+	var bot_id: int = room.people.back().id
+	for bad_id in ["%d" % bot_id, float(bot_id), true, 0, -1]:
+		var result: Dictionary = test_server.dispatch_bot_message(10, {"type": "bot_remove", "person_id": bad_id})
+		check(not result.ok and room.people.size() == 3, "malformed target ID rejected without mutation")
+	check(not test_server.dispatch_bot_message(10, {"type": "bot_remove", "person_id": 9999}).ok, "unknown participant target rejected")
+	check(not test_server.dispatch_bot_message(10, {"type": "bot_remove", "person_id": room.people[0].id}).ok, "human target rejected")
+	check(not test_server.dispatch_bot_message(20, {"type": "bot_difficulty", "person_id": bot_id, "difficulty": "hard"}).ok, "guest cannot change difficulty")
+	check(not test_server.dispatch_bot_message(10, {"type": "bot_difficulty", "person_id": bot_id, "difficulty": "bogus"}).ok, "unknown difficulty rejected")
 
 
 func test_input_commands() -> void:
