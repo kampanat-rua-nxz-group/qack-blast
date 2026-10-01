@@ -6,6 +6,7 @@ var failures := 0
 
 
 func _initialize() -> void:
+	test_shared_rule_helpers()
 	test_board_profiles_and_rejections()
 	test_expanded_spawn_fairness()
 	test_ten_player_scoring_and_pickups()
@@ -1701,3 +1702,27 @@ func test_map_movement_speed_tuning() -> void:
 				game.move_player(0, 0.1, Vector2.RIGHT)
 				var expected := base_speed * (1.0 + bonus) * (0.8 if surface == 1 else 1.0) * 0.1
 				check(is_equal_approx(start.distance_to(game.players[0].pos), expected), "%s surface %d pickup %d movement speed" % [mode, surface, pickup_count])
+
+
+func test_shared_rule_helpers() -> void:
+	var rules = load("res://scripts/arena_game.gd")
+	var game = rules.new()
+	check(game.has_method("blast_tiles"), "shared blast geometry exists")
+	check(game.has_method("movement_speed_for"), "shared movement speed exists")
+	if not game.has_method("blast_tiles") or not game.has_method("movement_speed_for"):
+		return
+	var cells: Array = [[0, 0, 0, 0, 0], [0, 0, 2, 0, 0], [0, 0, 1, 0, 0]]
+	var crates := {Vector2i(2, 1): true}
+	var original := cells.duplicate(true)
+	var expected: Array[Vector2i] = [Vector2i(1, 1), Vector2i(0, 1), Vector2i(2, 1), Vector2i(1, 0), Vector2i(1, 2)]
+	check(rules.blast_tiles(cells, Vector2i(1, 1), 4, false, crates) == expected, "normal blast ordered rays stop at first crate and dimensions")
+	check(cells == original, "blast helper does not mutate cells")
+	cells[1][2] = 0
+	check(rules.blast_tiles(cells, Vector2i(1, 1), 4, false, crates) == expected, "removed same-batch crate still blocks")
+	var danger: Array = rules.blast_tiles(cells, Vector2i(2, 1), 0, true, crates)
+	check(danger == [Vector2i(0, 1), Vector2i(1, 1), Vector2i(2, 1), Vector2i(3, 1), Vector2i(4, 1), Vector2i(2, 0), Vector2i(2, 2)], "danger preserves full row then column order across walls with origin once")
+	check(rules.blast_tiles(cells, Vector2i(2, 0), 4, false, {}).has(Vector2i(2, 1)) and not rules.blast_tiles(cells, Vector2i(2, 0), 4, false, {}).has(Vector2i(2, 2)), "normal wall blocks without receiving flame")
+	for fixture in [[0, 0.0, 94.0], [1, 0.0, 75.2], [0, 0.5, 141.0], [1, 0.5, 112.8]]:
+		check(is_equal_approx(rules.movement_speed_for("pond", fixture[0], fixture[1]), fixture[2]), "exact Lily speed %s" % str(fixture))
+	for mode in ["fixed", "random", "frost", "night"]:
+		check(is_equal_approx(rules.movement_speed_for(mode, 0, 0.0), 188.0), "ordinary map speed " + mode)
