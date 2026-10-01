@@ -191,7 +191,8 @@ func test_client_event_handling() -> void:
 	var received: Array = []
 	var client = load("res://scripts/room_client.gd").new()
 	client.events_received.connect(func(round_id, events): received.append([round_id, events.map(func(event): return event.event_id)]))
-	var game := {"type": "game", "round_id": 1, "snapshot_seq": 1, "event_cursor": 0}
+	client.accept({"type": "room", "round_id": 1})
+	var game := event_snapshot(1, 1, 0)
 	client.accept({"type": "events", "round_id": 1, "events": [{"event_id": 1, "kind": "bomb_placed"}]})
 	check(received.is_empty(), "events before matching game state are queued")
 	client.accept(game)
@@ -202,7 +203,9 @@ func test_client_event_handling() -> void:
 	check(received.size() == 2, "fully duplicate batch emits nothing")
 	client.accept({"type": "events", "round_id": 2, "events": [{"event_id": 1, "kind": "bomb_placed"}]})
 	check(received.size() == 2, "next-round events wait for matching state")
-	client.accept({"type": "game", "round_id": 2, "snapshot_seq": 1, "event_cursor": 0})
+	client.accept(event_snapshot(2, 1, 0))
+	check(received.size() == 2, "future game alone does not release events before room")
+	client.accept({"type": "room", "round_id": 2})
 	check(received.size() == 3 and received[2] == [2, [1]], "round boundary flushes queue and resets id space")
 	client.accept({"type": "events", "round_id": 1, "events": [{"event_id": 9, "kind": "bomb_placed"}]})
 	check(received.size() == 3, "stale-round events are ignored")
@@ -214,8 +217,15 @@ func test_client_event_handling() -> void:
 	received.clear()
 	var late = load("res://scripts/room_client.gd").new()
 	late.events_received.connect(func(round_id, events): received.append([round_id, events.map(func(event): return event.event_id)]))
-	late.accept({"type": "game", "round_id": 3, "snapshot_seq": 40, "event_cursor": 5})
+	late.accept({"type": "room", "round_id": 3})
+	late.accept(event_snapshot(3, 40, 5))
 	late.accept({"type": "events", "round_id": 3, "events": [{"event_id": 4, "kind": "bomb_exploded"}, {"event_id": 5, "kind": "player_eliminated"}, {"event_id": 6, "kind": "round_ended"}]})
 	check(received == [[3, [6]]], "late join starts at the snapshot cursor without replaying history")
 	client.free()
 	late.free()
+
+
+func event_snapshot(round_id: int, sequence: int, cursor: int) -> Dictionary:
+	var game = preload("res://scripts/arena_game.gd").new()
+	game.new_round()
+	return {"type": "game", "round_id": round_id, "snapshot_seq": sequence, "event_cursor": cursor, "geometry": {"width": game.WIDTH, "height": game.HEIGHT, "cell": game.CELL, "origin": [game.ORIGIN.x, game.ORIGIN.y]}, "board": game.board, "terrain": game.terrain}

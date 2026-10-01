@@ -37,6 +37,7 @@ func run_checks(app) -> void:
 	test_spectator_has_no_player_marker(app)
 	test_shared_map_picker(app)
 	test_events_are_consumed_and_mute_is_available(app)
+	test_slot_nine_online_feedback(app)
 	test_room_change_clears_transient_feedback(app)
 	var registry = RoomRegistry.new()
 	var result: Dictionary = registry.create_room(10, "Duck")
@@ -64,6 +65,7 @@ func run_checks(app) -> void:
 	check(app.arena.game.players.size() == 2 and app.arena.game.board.size() == 11, "scene receives server snapshot")
 	check(app.arena.game.tile_at(app.arena.game.players[1].pos) == Vector2i(11, 9), "snapshot restores player positions")
 	check(app.arena.game.wall_mode == "night" and app.arena.game.players[0].vision == 1, "night vision arrives in server snapshot")
+	check(app.arena.visible_tile(Vector2i(3, 1)) and not app.arena.within_audio_reach(Vector2i(3, 1)), "online faint region is visible but silent")
 	check(registry.game_view(room).has("terrain") and registry.game_view(room).players[0].has("speed_bonus"), "terrain and speed upgrade are included in snapshots")
 	room.game.terrain[1][1] = 1
 	room.game.players[0].speed_bonus = 0.25
@@ -264,6 +266,7 @@ func test_authoritative_display_separation(app) -> void:
 func test_game_arrives_before_room(app) -> void:
 	var registry = RoomRegistry.new()
 	var created: Dictionary = registry.create_room(1, "One")
+	app.client.accept({"type": "joined", "person_id": created.person_id})
 	registry.join_room(2, created.code, "Two")
 	registry.start_round(1)
 	var room: Dictionary = registry.room_for_peer(1)
@@ -278,7 +281,13 @@ func test_game_arrives_before_room(app) -> void:
 	registry.start_round(1)
 	app.client.accept(registry.game_view(room))
 	check(not app.arena.visible, "future game snapshot stays hidden until matching room authority")
+	app.arena.feedback.unlocked = true
+	var before: int = app.arena.feedback.cues.count("pickup")
+	app.client.accept({"type": "events", "round_id": room.round_id, "events": [{"event_id": 1, "kind": "pickup_collected", "player": 0, "tile": [1,1], "pickup": 0, "granted": true}]})
+	check(app.arena.feedback.cues.count("pickup") == before, "future game event waits for room and matched context")
 	app.client.accept(registry.room_view(room))
+	check(app.arena.feedback.cues.count("pickup") == before + 1, "future game then event then room presents event once")
+	check(app.arena.feedback.notice == "BOMB +1", "queued pickup uses matching viewer identity")
 	check(app.arena.visible and app.arena.game.wall_mode == "pond" and app.arena.countdown_text == "3", "room arriving after game applies matching prepared arena before displaying it")
 	app.client.accept({"type": "left"})
 
@@ -453,6 +462,15 @@ func test_events_are_consumed_and_mute_is_available(app) -> void:
 	app.arena.feedback.unlocked = true
 	var setup := start_two_player_round(app)
 	var room: Dictionary = setup.room
+	room.game.slide_active[0] = true
+	room.game.move_targets[0] = room.game.center(Vector2i(2, 1))
+	app.client.accept(setup.registry.game_view(room))
+	check(app.arena.game.is_sliding(0) and app.presentation.sample(Time.get_ticks_usec() / 1000000.0).sliding[0], "online slide state reaches authority mirror and sampled pose")
+	room.game.players[1].alive = false
+	room.game.players[1].elimination_cause = {"kind": "own_bomb", "owner": 1}
+	var cue_count: int = app.arena.feedback.cues.size()
+	app.client.accept(setup.registry.game_view(room))
+	check(app.arena.feedback.personal_cause.contains("own bomb") and app.arena.feedback.cues.size() == cue_count, "dead viewer snapshot restores cause without historical sound")
 	room.game.place_bomb(0)
 	app.client.accept({"type": "events", "round_id": room.round_id, "events": room.game.take_events()})
 	check(app.arena.feedback.cues.has("place"), "events message reaches feedback once room state matches")
@@ -478,3 +496,40 @@ func test_room_change_clears_transient_feedback(app) -> void:
 	check(not app.arena.feedback.personal_cause.is_empty(), "personal cause set before leaving")
 	app.client.accept({"type": "left"})
 	check(app.arena.feedback.personal_cause.is_empty() and app.arena.feedback.effects.is_empty() and app.arena.feedback.round_id == -1, "leaving a room clears transient feedback")
+
+
+func test_slot_nine_online_feedback(app) -> void:
+	app.client.accept({"type": "left"})
+	var registry = RoomRegistry.new()
+	var created: Dictionary = registry.create_room(1, "Duck")
+	for peer in range(2, 11):
+		registry.join_room(peer, created.code, "Duck")
+	var room: Dictionary = registry.rooms[created.code]
+	registry.choose_map(1, "night")
+	registry.start_round(1)
+	app.client.accept({"type": "joined", "person_id": room.people[9].id})
+	app.client.accept(registry.room_view(room))
+	app.client.accept(registry.game_view(room))
+	check(app.arena.viewer_slot == 9 and app.arena.player_marker(9) == "YOU" and app.arena.board.spawn_marker_slot == 9, "tenth local viewer receives countdown identity and marker")
+	registry.tick(3.0)
+	app.client.accept(registry.room_view(room))
+	room.game.slide_active[9] = true
+	room.game.move_targets[9] = room.game.center(Vector2i(2, 11))
+	app.client.accept(registry.game_view(room))
+	check(app.arena.game.is_sliding(9) and app.presentation.sample(Time.get_ticks_usec() / 1000000.0).sliding[9], "slot 9 slide state reaches rule mirror and presentation")
+	app.arena.present_board()
+	check(app.arena.visible_tile(app.arena.game.tile_at(app.arena.game.players[9].pos)) and not app.arena.visible_tile(app.arena.game.tile_at(app.arena.game.players[0].pos)), "slot 9 Nightfall falloff follows its own authoritative tile")
+	app.arena.feedback.persist = false
+	app.arena.feedback.unlocked = true
+	var before: int = app.arena.feedback.cues.size()
+	room.game.place_bomb(9)
+	var events: Array = room.game.take_events()
+	app.client.accept({"type": "events", "round_id": room.round_id, "events": events})
+	check(app.arena.feedback.cues.size() == before + 1 and app.arena.feedback.cues.back() == "place", "slot 9 receives personal bomb placement feedback")
+	app.client.accept({"type": "events", "round_id": room.round_id, "events": events})
+	check(app.arena.feedback.cues.size() == before + 1, "slot 9 placement event deduplicates")
+	room.game.players[9].alive = false
+	room.game.players[9].elimination_cause = {"kind": "own_bomb", "owner": 9}
+	app.client.accept(registry.game_view(room))
+	check(app.arena.feedback.personal_cause.contains("own bomb"), "slot 9 snapshot restores personal elimination cause")
+	app.client.accept({"type": "left"})

@@ -20,10 +20,20 @@ func _initialize() -> void:
 	test_focus_loss_resets_input()
 	var app = load("res://scenes/online.tscn").instantiate()
 	root.add_child(app)
-	call_deferred("test_online_input_lifecycle", app)
+	call_deferred("run_online_lifecycle_cases", app)
 
 
-func test_online_input_lifecycle(app) -> void:
+func run_online_lifecycle_cases(app) -> void:
+	test_online_input_lifecycle(app, 2, 0)
+	app.queue_free()
+	var ten_app = load("res://scenes/online.tscn").instantiate()
+	root.add_child(ten_app)
+	test_online_input_lifecycle(ten_app, 10, 9)
+	ten_app.queue_free()
+	finish()
+
+
+func test_online_input_lifecycle(app, player_count: int, local_slot: int) -> void:
 	var recording = RecordingClient.new()
 	app.client = recording
 	var key := InputEventKey.new()
@@ -35,13 +45,15 @@ func test_online_input_lifecycle(app) -> void:
 	check(recording.messages.is_empty(), "nickname typing produces no gameplay commands")
 	var registry = load("res://scripts/room_registry.gd").new()
 	var joined: Dictionary = registry.create_room(10, "A")
-	registry.join_room(20, joined.code, "B")
+	for slot in range(1, player_count):
+		registry.join_room((slot + 1) * 10, joined.code, "Duck%d" % slot)
 	registry.start_round(10)
 	check(registry.room_for_peer(10).phase == "countdown", "start enters authoritative countdown")
 	registry.tick(3.0)
-	recording.person_id = joined.person_id
+	recording.person_id = registry.room_for_peer(10).people[local_slot].id
 	recording.room = registry.room_view(registry.room_for_peer(10))
 	app._room_changed(recording.room)
+	check(app.viewer_slot() == local_slot, "%d-player lifecycle selects local slot %d" % [player_count, local_slot])
 	app._input(key)
 	check(recording.messages.size() == 1 and recording.messages[0].direction == [0.0, -1.0] and recording.messages[0].move_press == [0.0, -1.0], "direction press sends immediate held direction and edge")
 	key.echo = true
@@ -109,8 +121,23 @@ func test_online_input_lifecycle(app) -> void:
 	key.pressed = true
 	app._input(key)
 	check(recording.messages.back().plant, "release and repress plants after GO")
+	app._notification(MainLoop.NOTIFICATION_APPLICATION_FOCUS_OUT)
+	app._notification(MainLoop.NOTIFICATION_APPLICATION_FOCUS_IN)
+	key.keycode = KEY_W
+	key.physical_keycode = KEY_W
+	key.pressed = true
+	app._input(key)
+	key.keycode = KEY_UP
+	key.physical_keycode = KEY_UP
+	app._input(key)
+	key.pressed = false
+	app._input(key)
+	check(recording.messages.back().direction == [0.0, -1.0], "OnlineApp alias release preserves held WASD direction")
+	key.keycode = KEY_W
+	key.physical_keycode = KEY_W
+	app._input(key)
+	check(recording.messages.back().direction == [0.0, 0.0], "OnlineApp release of final alias returns neutral")
 	recording.free()
-	finish()
 
 
 func test_latest_held_key_wins() -> void:

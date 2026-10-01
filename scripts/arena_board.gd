@@ -2,6 +2,14 @@ extends Node2D
 
 const CharacterCatalog = preload("res://scripts/character_catalog.gd")
 const DuckArt = preload("res://scripts/duck_art.gd")
+const GameFeedback = preload("res://scripts/game_feedback.gd")
+const NightVisibility = preload("res://scripts/night_visibility.gd")
+const EFFECT_RADIUS := 30.0
+const EFFECT_GROWTH := 26.0
+const PULSE_AMPLITUDE := 0.07
+const URGENT_PULSE_GAIN := 0.1
+const PULSE_RATE := 0.013
+const URGENT_PULSE_RATE_GAIN := 0.02
 const COLORS = CharacterCatalog.COLORS
 
 var game
@@ -11,6 +19,7 @@ var spawn_marker_slot := -1
 var networked := false
 var visual_facing: Array = []
 var walk_phase: Array = []
+var feedback_effects: Array = []
 
 
 func present(next_game, next_display_state: Dictionary, next_viewer_slot: int) -> void:
@@ -57,7 +66,7 @@ func _draw() -> void:
 			elif game.terrain[y][x] == 1:
 				draw_rect(rect.grow(-3.0), Color("92d9dd"))
 			elif game.terrain[y][x] == 2:
-				draw_rect(rect.grow(-3.0), Color("c5e9f7"))
+				draw_ice(rect)
 			if game.board[y][x] == game.WALL:
 				draw_wall(rect, colors)
 			elif game.board[y][x] == game.CRATE:
@@ -89,12 +98,20 @@ func _draw() -> void:
 			if networked and i == viewer_slot:
 				draw_arc(player_position(i), 23.0, 0.0, TAU, 32, Color("403d57"), 3.5, true)
 				draw_arc(player_position(i), 23.0, 0.0, TAU, 32, Color("fffdf7"), 1.5, true)
-			draw_duck(player_position(i), i, player_facing(i), player_walk_phase(i))
+			var gliding := player_sliding(i)
+			if gliding:
+				draw_slide_trail(player_position(i), player_facing(i))
+			draw_duck(player_position(i), i, player_facing(i) + (0.10 if gliding else 0.0), 0.0 if gliding else player_walk_phase(i))
 	# Draw local-only spawn identification beneath the existing Nightfall mask.
 	if spawn_marker_slot >= 0 and spawn_marker_slot < game.players.size():
 		var at := player_position(spawn_marker_slot)
 		draw_arc(at, 22.0, 0.0, TAU, 32, Color("fffdf7"), 2.0, true)
 		centered_text("YOU", at + Vector2(0, -25), 12, Color("fffdf7"))
+	for effect in feedback_effects:
+		var progress: float = effect.age / GameFeedback.EFFECT_SECONDS
+		var center: Vector2 = game.center(Vector2i(effect.tile[0], effect.tile[1]))
+		var ring := Color("c35162") if effect.personal else Color("e9a15b")
+		draw_arc(center, EFFECT_RADIUS + EFFECT_GROWTH * progress, 0.0, TAU, 32, Color(ring, 1.0 - progress), 4.0)
 	if game.wall_mode == "night" and not game.round_over:
 		draw_night_vision()
 	if int(floor(game.round_elapsed * 2.0)) % 2 == 0:
@@ -161,11 +178,24 @@ func vision_darkness(point: Vector2) -> float:
 			continue
 		if not game.players[i].alive:
 			continue
-		var radius: float = (game.players[i].vision + 0.9) * game.CELL
-		var fade_start: float = radius - game.CELL * 0.5
-		var fade: float = clampf((point.distance_to(player_position(i)) - fade_start) / (radius - fade_start), 0.0, 1.0)
-		darkness = minf(darkness, fade * fade * (3.0 - 2.0 * fade))
+		darkness = minf(darkness, NightVisibility.darkness_at(point.distance_to(player_position(i)), game.players[i].vision, game.CELL))
 	return darkness
+
+
+func within_audio_reach(tile: Vector2i) -> bool:
+	if game.wall_mode != "night" or game.round_over:
+		return true
+	if networked and (viewer_slot < 0 or not game.players[viewer_slot].alive):
+		return true
+	var point: Vector2 = game.center(tile)
+	for i in range(game.players.size()):
+		if networked and i != viewer_slot:
+			continue
+		if not game.players[i].alive:
+			continue
+		if NightVisibility.within_audio_reach(point.distance_to(player_position(i)), game.players[i].vision, game.CELL):
+			return true
+	return false
 
 
 func draw_night_vision() -> void:
@@ -264,14 +294,37 @@ func draw_flame(pos: Vector2, owners: Array) -> void:
 
 
 func draw_bomb(pos: Vector2, fuse: float) -> void:
-	var pulse := 1.0 + 0.07 * sin(Time.get_ticks_msec() * 0.013)
+	var urgency := GameFeedback.urgency(fuse)
+	var pulse := 1.0 + (PULSE_AMPLITUDE + URGENT_PULSE_GAIN * urgency) * sin(Time.get_ticks_msec() * (PULSE_RATE + URGENT_PULSE_RATE_GAIN * urgency))
 	draw_circle(pos + Vector2(0, 5), 18.0, Color("c0c6ce"))
 	draw_circle(pos, 17.0 * pulse, Color("49475f"))
 	draw_circle(pos + Vector2(-6, -6), 5.0, Color("77758c"))
 	draw_line(pos + Vector2(9, -12), pos + Vector2(14, -20), Color("f7d292"), 3.0, true)
-	draw_circle(pos + Vector2(15, -21), 4.0 if fuse > 0.6 else 5.5, Color("ffae69"))
+	draw_circle(pos + Vector2(15, -21), 4.0 + 2.5 * urgency, Color("ffae69").lerp(Color("ff6b5b"), urgency))
 
 
 func draw_duck(pos: Vector2, player_index: int, angle: float = 0.0, phase: float = 0.0, canvas: CanvasItem = self, size: float = 52.0) -> void:
 	var avatar_id: int = game.players[player_index].get("avatar_id", player_index)
 	DuckArt.draw(canvas, CharacterCatalog.appearance(avatar_id), pos, angle, phase, size)
+
+
+func player_sliding(i: int) -> bool:
+	return bool(display_state.sliding[i]) if display_state.has("sliding") else game.is_sliding(i)
+
+
+func draw_ice(rect: Rect2) -> void:
+	var inset := rect.grow(-3.0)
+	draw_rect(inset, Color("97cfe7"))
+	draw_rect(inset, Color("edfaff"), false, 1.5)
+	for offset in [0.22, 0.46, 0.70]:
+		var start := rect.position + Vector2(rect.size.x * offset, rect.size.y * 0.72)
+		draw_line(start, start + Vector2(rect.size.x * 0.20, -rect.size.y * 0.38), Color("e1f7ff"), 2.0, true)
+	var sheen := 0.10 + 0.05 * sin(Time.get_ticks_msec() * 0.0018 + rect.position.x * 0.03)
+	draw_rect(inset, Color(1.0, 1.0, 1.0, sheen))
+
+
+func draw_slide_trail(pos: Vector2, angle: float) -> void:
+	var forward := Vector2.DOWN.rotated(angle)
+	var side := forward.orthogonal()
+	for offset in [-6.0, 6.0]:
+		draw_line(pos - forward * 17.0 + side * offset, pos - forward * 33.0 + side * offset, Color("def7ffb0"), 2.5, true)

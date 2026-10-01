@@ -8,7 +8,10 @@ const ArenaGame = preload("res://scripts/arena_game.gd")
 const LobbyArt = preload("res://scripts/lobby_art.gd")
 const CharacterCatalog = preload("res://scripts/character_catalog.gd")
 const DuckArt = preload("res://scripts/duck_art.gd")
+const GameFeedback = preload("res://scripts/game_feedback.gd")
 const Ui = preload("res://scripts/lobby_ui.gd")
+
+const WIN_NOTE := "You won the round!"
 
 var room_code: String = ""
 var feedback: String = ""
@@ -17,6 +20,7 @@ var displayed_host := -1
 var displayed_person_id := -1
 var room_code_label: Label
 var outcome_label: Label
+var personal_note_label: Label
 var map_label: Label
 var status_label: Label
 var leaderboard_rows: VBoxContainer
@@ -67,6 +71,10 @@ func _ready() -> void:
 	outcome_label.name = "Outcome"
 	outcome_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	outcome_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	personal_note_label = Ui.label(column, "", 16, Ui.NAVY)
+	personal_note_label.name = "PersonalNote"
+	personal_note_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	personal_note_label.hide()
 	var headings := HBoxContainer.new()
 	column.add_child(headings)
 	_add_score_cells(headings, "#", "PLAYER", "WINS", "KILLS")
@@ -101,12 +109,13 @@ func _ready() -> void:
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 
-func present(room: Dictionary, game: Dictionary, person_id: int) -> void:
+func present(room: Dictionary, game: Dictionary, person_id: int, personal_note: String = "") -> void:
 	room_code = str(room.get("code", ""))
 	room_code_label.text = room_code
 	map_label.text = "MAP: %s" % ArenaGame.MAP_NAMES.get(room.get("wall_mode", "fixed"), "Classic")
 	var people: Array = room.get("people", [])
 	outcome_label.text = _outcome_text(game, people)
+	_show_personal_note(_personal_note_text(game, people, person_id, personal_note))
 	var outcome_size := 32
 	while outcome_label.get_theme_font("font").get_string_size(outcome_label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, outcome_size).x > 268.0 and outcome_size > 18:
 		outcome_size -= 1
@@ -124,6 +133,34 @@ func present(room: Dictionary, game: Dictionary, person_id: int) -> void:
 	map_button.disabled = room.get("phase", "results") not in ["lobby", "results"]
 	replay_button.disabled = not host or connected_count < 2
 	status_label.text = feedback if not feedback.is_empty() else "Choose a map or play again." if host else "Waiting for the host to start the next round."
+
+
+func _show_personal_note(text: String) -> void:
+	personal_note_label.text = text
+	personal_note_label.visible = not text.is_empty()
+
+
+func _personal_note_text(game: Dictionary, people: Array, person_id: int, personal_note: String) -> String:
+	var slot := -1
+	var names: Array = []
+	for person in people:
+		var person_slot := int(person.get("slot", -1))
+		if person_slot < 0:
+			continue
+		while names.size() <= person_slot:
+			names.append("")
+		names[person_slot] = str(person.name)
+		if person.id == person_id:
+			slot = person_slot
+	if slot < 0:
+		return ""
+	var players: Array = game.get("players", [])
+	if slot >= players.size():
+		return personal_note
+	if players[slot].get("alive", false):
+		return WIN_NOTE
+	var text := GameFeedback.out_text(players[slot].get("elimination_cause", {}), names)
+	return personal_note if text == "OUT" and not personal_note.is_empty() else text
 
 
 func _outcome_text(game: Dictionary, people: Array) -> String:

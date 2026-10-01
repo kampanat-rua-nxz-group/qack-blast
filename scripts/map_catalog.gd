@@ -15,13 +15,13 @@ const ENTRIES = {
 	},
 	"pond": {
 		"name": "Lily Pond",
-		"terrain_text": "Shallow water slows movement. Crates and walls still block paths.",
+		"terrain_text": "Move at half normal speed. Shallow water slows you a further 20%.",
 		"pickup_text": "Speed boosts movement everywhere; Bomb Capacity and Blast Range also drop.",
 		"hazard_text": "Sudden death: deep water floods inward from the edges and eliminates ducks.",
 	},
 	"frost": {
 		"name": "Frost Garden",
-		"terrain_text": "Ice slides ducks one extra tile, unless a wall, crate or bomb blocks the path.",
+		"terrain_text": "Broad ice patches slide ducks one extra tile, unless a wall, crate or bomb blocks the path.",
 		"pickup_text": "Bomb Kick: walk into a bomb to send it toward the next blocker. Capacity and Range also drop.",
 		"hazard_text": "Sudden death: increasingly many marked rows are struck by blizzards.",
 	},

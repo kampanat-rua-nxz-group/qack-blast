@@ -48,6 +48,11 @@ var presentation = ArenaPresentation.new()
 var input_phase := ""
 var go_remaining := 0.0
 var arena_round_id := -1
+var mute_button: Button
+var _last_countdown_shown := -1
+
+const MUTE_BUTTON_RECT := Rect2(832, 24, 118, 38)
+const MUTE_FONT_SIZE := 13
 
 
 func _ready() -> void:
@@ -59,11 +64,13 @@ func _ready() -> void:
 	arena.set_physics_process(false)
 	arena.set_process_input(false)
 	arena.hide()
+	arena.feedback.unlocked = not OS.has_feature("web")
 	add_child(client)
 	client.transport_result.connect(_transport_result)
 	client.room_result.connect(_room_result)
 	client.room_changed.connect(_room_changed)
 	client.game_changed.connect(_game_changed)
+	client.events_received.connect(_on_events)
 	client.error_received.connect(_show_error)
 	client.left_room.connect(_left_room)
 	client.transport_disconnected.connect(_disconnected)
@@ -77,6 +84,52 @@ func _ready() -> void:
 	map_picker = MapPicker.new()
 	add_child(map_picker)
 	map_picker.map_selected.connect(_select_map)
+	build_mute_button()
+
+
+func build_mute_button() -> void:
+	mute_button = Button.new()
+	mute_button.name = "MuteButton"
+	mute_button.focus_mode = Control.FOCUS_NONE
+	mute_button.position = MUTE_BUTTON_RECT.position
+	mute_button.size = MUTE_BUTTON_RECT.size
+	mute_button.add_theme_font_size_override("font_size", MUTE_FONT_SIZE)
+	mute_button.pressed.connect(_toggle_mute)
+	add_child(mute_button)
+	_render_mute()
+
+
+func _toggle_mute() -> void:
+	arena.feedback.unlock()
+	arena.feedback.set_muted(not arena.feedback.muted)
+	_render_mute()
+
+
+func _render_mute() -> void:
+	mute_button.text = "Sound: OFF" if arena.feedback.muted else "Sound: ON"
+
+
+func _on_events(round_id: int, events: Array) -> void:
+	var names: Array = []
+	var viewer := viewer_slot()
+	for person in client.room.get("people", []):
+		if person.slot >= 0:
+			while names.size() <= person.slot:
+				names.append("")
+			names[person.slot] = person.name
+	var context := {"viewer_slot": viewer, "wall_mode": client.room.get("wall_mode", "fixed"), "names": names, "local_play": false}
+	context.visible = func(tile: Array) -> bool: return arena.visible_tile(Vector2i(tile[0], tile[1]))
+	context.audio_reach = func(tile: Array) -> bool: return arena.within_audio_reach(Vector2i(tile[0], tile[1]))
+	arena.feedback.consume_events(round_id, events, context)
+	if client.room.get("phase", "") == "results" and round_id == int(client.room.get("round_id", -1)):
+		results.present(client.room, client.game, client.person_id, arena.feedback.personal_cause)
+
+
+func viewer_slot() -> int:
+	for person in client.room.get("people", []):
+		if person.id == client.person_id:
+			return person.slot
+	return -1
 
 
 func web_server_param() -> String:
@@ -176,7 +229,7 @@ func build_waiting_card() -> void:
 	copy_button.name = "CopyCodeButton"
 	copy_button.pressed.connect(_copy_code)
 	Ui.spacer(column, 8)
-	Ui.label(column, "The host starts the round once 2–6 players have joined.", 13, Ui.MUTED)
+	Ui.label(column, "The host starts the round once 2–10 players have joined.", 13, Ui.MUTED)
 
 
 func _copy_code() -> void:
@@ -278,6 +331,12 @@ func _room_changed(room: Dictionary) -> void:
 	arena.visible = (playing or countdown) and matched
 	lobby.visible = not arena.visible and not showing_results
 	arena.countdown_text = str(int(ceil(room.countdown_remaining))) if countdown else ("GO" if go_remaining > 0.0 and playing else "")
+	if arena.countdown_text.is_valid_int() and int(arena.countdown_text) > 0:
+		if int(arena.countdown_text) != _last_countdown_shown:
+			_last_countdown_shown = int(arena.countdown_text)
+			arena.feedback.play_cue("countdown")
+	else:
+		_last_countdown_shown = -1
 	results.visible = showing_results
 	arena.player_names.clear()
 	for person in room.people:
@@ -310,16 +369,18 @@ func _room_changed(room: Dictionary) -> void:
 	if room.phase == "results" and not client.game.is_empty():
 		status_label.text = "Round over: %s. The host can start another round." % arena.round_result_text()
 	elif room.phase == "lobby":
-		status_label.text = room.get("notice", "") if not room.get("notice", "").is_empty() else "Waiting for 2–6 players."
+		status_label.text = room.get("notice", "") if not room.get("notice", "").is_empty() else "Waiting for 2–10 players."
 	elif (playing or countdown) and not matched:
 		status_label.text = "Preparing the next round…"
 	elif countdown:
 		status_label.text = "Round starts in %d…" % int(ceil(room.countdown_remaining))
 	if showing_results:
-		results.present(room, client.game if matched else {}, client.person_id)
+		results.present(room, client.game if matched else {}, client.person_id, arena.feedback.personal_cause)
 
 
 func _game_changed(snapshot: Dictionary) -> void:
+	if not client.valid_snapshot_geometry(snapshot):
+		return
 	if not client.room.is_empty() and int(snapshot.round_id) != int(client.room.round_id):
 		return
 	if not presentation.accepts_snapshot(snapshot):
@@ -335,9 +396,11 @@ func _game_changed(snapshot: Dictionary) -> void:
 	game.terrain = snapshot.get("terrain", [])
 	game.players.clear()
 	game.move_targets.clear()
+	game.slide_active.clear()
 	for player in snapshot.players:
-		game.players.append({"pos": Vector2(player.pos[0], player.pos[1]), "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.get("speed_bonus", 0.0), "can_kick": player.get("can_kick", false), "facing": player.facing, "avatar_id": player.get("avatar_id", game.players.size())})
+		game.players.append({"pos": Vector2(player.pos[0], player.pos[1]), "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.get("speed_bonus", 0.0), "can_kick": player.get("can_kick", false), "facing": player.facing, "avatar_id": player.get("avatar_id", game.players.size()), "elimination_cause": player.get("elimination_cause", {}).duplicate(true)})
 		game.move_targets.append(Vector2(player.move_target[0], player.move_target[1]))
+		game.slide_active.append(bool(player.get("sliding", false)))
 	game.player_count = game.players.size()
 	game.bombs.clear()
 	for bomb in snapshot.bombs:
@@ -368,14 +431,27 @@ func _game_changed(snapshot: Dictionary) -> void:
 				arena.viewer_slot = person.slot
 				break
 	arena.present_board(presentation.sample(Time.get_ticks_usec() / 1000000.0))
+	arena.feedback.reset(int(snapshot.round_id), client.event_floor)
+	if arena.viewer_slot >= 0 and arena.viewer_slot < game.players.size() and not game.players[arena.viewer_slot].alive:
+		var cause: Dictionary = game.players[arena.viewer_slot].elimination_cause
+		if not cause.is_empty():
+			var names: Array = []
+			for person in client.room.get("people", []):
+				if person.slot >= 0:
+					while names.size() <= person.slot:
+						names.append("")
+					names[person.slot] = person.name
+			arena.feedback.personal_cause = arena.feedback.out_text(cause, names)
 	if not client.room.is_empty():
 		_room_changed(client.room)
 	if not client.room.is_empty() and client.room.phase == "results":
 		status_label.text = "Round over: %s. The host can start another round." % arena.round_result_text()
-		results.present(client.room, snapshot, client.person_id)
+		results.present(client.room, snapshot, client.person_id, arena.feedback.personal_cause)
 
 
 func _input(event: InputEvent) -> void:
+	if event.is_pressed():
+		arena.feedback.unlock()
 	if not input_focused or client.room.is_empty() or not event is InputEventKey:
 		return
 	var key := event as InputEventKey
@@ -456,6 +532,7 @@ func _show_error(message: String) -> void:
 
 
 func _left_room() -> void:
+	arena.feedback.clear()
 	map_picker.hide()
 	presentation.reset()
 	go_remaining = 0.0

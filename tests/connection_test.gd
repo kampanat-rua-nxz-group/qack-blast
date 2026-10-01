@@ -26,6 +26,7 @@ func _initialize() -> void:
 	test_cancel_ignores_old_attempt()
 	test_sent_request_is_not_auto_replayed()
 	test_room_rejection_does_not_retry_transport()
+	test_slot_nine_transport_identity()
 	test_transport_generation_ignores_late_packets()
 	# Real transport smoke, kept separate from injected-time policy checks.
 	smoke_client = RoomClient.new()
@@ -204,3 +205,19 @@ func check(condition: bool, message: String) -> void:
 func finish() -> void:
 	print("Connection checks: %d failure(s)" % failures)
 	quit(1 if failures else 0)
+
+
+func test_slot_nine_transport_identity() -> void:
+	var client = RoomClient.new()
+	client.transport_generation = 9
+	client.accept({"type": "joined", "person_id": 10}, 9)
+	client.accept({"type": "room", "round_id": 1, "people": [{"id": 10, "slot": 9}]}, 9)
+	check(client.person_id == 10 and client.room.people[0].slot == 9, "transport retains tenth player's identity and slot 9")
+	client.close_transport(9)
+	check(client.person_id == 0 and client.room.is_empty(), "closing tenth player transport clears identity and room")
+	client.transport_generation = 10
+	client.accept({"type": "joined", "person_id": 10}, 9)
+	check(client.person_id == 0, "stale slot 9 connection cannot restore old identity")
+	client.accept({"type": "joined", "person_id": 11}, 10)
+	check(client.person_id == 11, "explicit rejoin accepts new participant identity")
+	client.free()

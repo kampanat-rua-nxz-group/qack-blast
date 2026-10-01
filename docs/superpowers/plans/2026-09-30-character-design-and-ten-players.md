@@ -1,6 +1,6 @@
 # Character Design and Ten-Player Expansion Implementation Plan
 
-> **For agentic workers:** Use superpowers:executing-plans or superpowers:subagent-driven-development when execution is requested. Steps use checkbox (`- [ ]`) syntax for tracking. This document is an analysis and implementation proposal, not evidence that ten-player support exists.
+> **For agentic workers:** Use superpowers:executing-plans or superpowers:subagent-driven-development when execution is requested. Steps use checkbox (`- [x]`) syntax for tracking. This document is an analysis and implementation proposal, not evidence that ten-player support exists.
 
 **Goal:** Support 2–10 online players whose characters remain recognizable during crowded play, while preserving the game's friendly duck identity and existing rules.
 
@@ -10,7 +10,7 @@
 
 **Spec:** The analysis and proposed design decisions below extend the [player experience plan](2026-09-30-player-experience-improvements.md). Existing [map rules](../specs/2026-09-29-map-identities-and-sudden-death-design.md) and [room/results semantics](../specs/2026-09-29-in-room-results-design.md) remain applicable.
 
-**Status — September 30, 2026:** The user requested character-design analysis and a maximum of **10 players**, and selected **ten duck looks with different colors and costumes**. Those are the requested direction and capacity target. Individual costume designs, map sizes, and layout choices below are proposed defaults pending visual/playtest feedback; no new character art or gameplay code has been implemented. The current baseline supports 2–6 players.
+**Status — October 1, 2026:** Tasks A–D are implemented and reviewed; Task E technical validation is complete within the recorded fixture scope, while human readability/fairness acceptance remains open. Online rooms support 2–10 connected participants. All 13 headless scripts and the final Web export passed. See the [acceptance record](../../playtests/2026-10-01-player-experience-acceptance.md) for actual browser/soak/latency/chain evidence, the missed Nightfall Web performance goal, and the artificial all-open transport stress failure. Remaining changes are uncommitted by instruction.
 
 ## Character design analysis
 
@@ -130,60 +130,71 @@ Follow the [execution order across both plans](2026-09-30-player-experience-impr
 
 ### Task A: Separate board rendering scale from rules
 
+**Task status:** Implemented/reviewed and committed in b9b4026; geometry/display invariance and existing-map rendering checks pass.
+
 **Files:** Create `scripts/arena_board.gd` and its UID; modify `scripts/arena.gd`, `scenes/arena.tscn`, `scripts/online_app.gd`, `scripts/room_registry.gd`, `tests/arena_test.gd`, and `tests/online_test.gd`.
 
 **Interfaces:** `ArenaBoard.present(game, display_state: Dictionary, viewer_slot: int) -> void` and `fit_to(region: Rect2, display_cell: float) -> void`. An empty `display_state` uses authoritative positions/facing and existing animation state; Main Task 2 later provides sampled `positions`, `facing`, and `walk_phase` arrays of the same player count. The child Node2D owns board drawing and its transform; parent HUD/text stay unscaled. Snapshot `geometry` has `width`, `height`, `cell`, and JSON-array `origin`.
 
-- [ ] Add `test_display_scale_does_not_change_rules` and `test_snapshot_geometry_round_trip`; compare one-tile movement time, collision, blast tiles, warnings, and Nightfall visible tiles before/after display-scale changes.
-- [ ] Run arena/online checks and confirm new geometry/presentation assertions fail.
-- [ ] Move board-only drawing into the child while reusing existing primitives. Do not apply a temporary draw transform that duck drawing later resets. Initially render from current authoritative state via the empty-display-state fallback and project every board-space element consistently. The following Main Task 2 plugs in interpolation through the same interface; this task does not require interpolation to exist yet.
-- [ ] Rerun affected tests; inspect existing 2/6-player scenes for identical layout and all five map effects. Check overlays are not covered by the board child.
-- [ ] Commit: `refactor(arena): separate board display scale from rule coordinates`.
+- [x] Add `test_display_scale_does_not_change_rules` and `test_snapshot_geometry_round_trip`; compare one-tile movement time, collision, blast tiles, warnings, and Nightfall visible tiles before/after display-scale changes.
+- [x] Run arena/online checks and confirm new geometry/presentation assertions fail.
+- [x] Move board-only drawing into the child while reusing existing primitives. Do not apply a temporary draw transform that duck drawing later resets. Initially render from current authoritative state via the empty-display-state fallback and project every board-space element consistently. The following Main Task 2 plugs in interpolation through the same interface; this task does not require interpolation to exist yet.
+- [x] Rerun affected tests; inspect existing 2/6-player scenes for identical layout and all five map effects. Check overlays are not covered by the board child.
+- [x] Commit: `refactor(arena): separate board display scale from rule coordinates`.
 
 ### Task B: Extend rules geometry and spawn generation
+
+**Task status:** Implemented/reviewed and committed in 3f04369; 2–10 geometry, deterministic spawn safety and map/rule regressions pass. Human fairness evidence belongs to E and remains open.
 
 **Files:** Modify `scripts/arena_game.gd`, `scripts/room_registry.gd`, `tests/arena_test.gd`, and `tests/rooms_test.gd`.
 
 **Interfaces:** Extend `configure_map(count: int) -> bool` and `new_round() -> bool` to reject unsupported counts before mutating the board; existing valid callers may ignore the success return. Add `spawn_candidates(count: int) -> Array[Vector2i]`. Keep rule coordinates at 44-unit cells for all counts >=4, with the existing origin convention. Carry chosen geometry in snapshots.
 
-- [ ] Add profile checks for every count 2–10 and invalid counts outside that range. Add deterministic spawn uniqueness/clearance/escape/connectivity cases for counts 7–10, all five maps, and seeds 0–99; keep 2–6 regressions.
-- [ ] Add ten-player winner/draw/chain-credit, all special pickups, kicked-bomb blocking, Nightfall reshuffle protection, and hazard progression tests on larger geometry.
-- [ ] Run rule/room tests and confirm unsupported counts fail; implement profiles, candidate selection, permutation, and spawn escape protection. Do not raise public room capacity yet.
-- [ ] Rerun tests and inspect generated maps for all new counts. Record crate-clearing and route fairness observations; the numeric area ratio is not sufficient acceptance evidence.
-- [ ] Commit: `feat(arena): support ten-player boards and safe spawn sets`.
+- [x] Add profile checks for every count 2–10 and invalid counts outside that range. Add deterministic spawn uniqueness/clearance/escape/connectivity cases for counts 7–10, all five maps, and seeds 0–99; keep 2–6 regressions.
+- [x] Add ten-player winner/draw/chain-credit, all special pickups, kicked-bomb blocking, Nightfall reshuffle protection, and hazard progression tests on larger geometry.
+- [x] Run rule/room tests and confirm unsupported counts fail; implement profiles, candidate selection, permutation, and spawn escape protection. Do not raise public room capacity yet.
+- [x] Rerun tests and inspect generated maps for all new counts. Record crate-clearing and route fairness observations; the numeric area ratio is not sufficient acceptance evidence.
+- [x] Commit: `feat(arena): support ten-player boards and safe spawn sets`.
 
 ### Task C: Shared identities, character direction, and ten-player HUD
+
+**Task status:** Implemented/reviewed; catalog/art committed in 99f6dc6 with roster integration in f881a6f. Silhouette/HUD regression checks and static inspections pass; complete contextual visual matrix remains open.
 
 **Files:** Create `scripts/character_catalog.gd`, `scripts/duck_art.gd`, and `tests/character_test.gd` with UIDs; modify `scripts/arena.gd`, `scripts/arena_board.gd`, `scripts/lobby_art.gd`, `scripts/online_app.gd`, `scripts/results_ui.gd`, `scripts/room_registry.gd`, `tests/online_test.gd`, and `tests/results_test.gd`.
 
 **Interfaces:** `CharacterCatalog.appearance(avatar_id: int) -> Dictionary` returns badge, palette, and accessory definition; `DuckArt.draw(target: CanvasItem, appearance: Dictionary, pos: Vector2, facing: float, phase: float, size: float) -> void`. Room-person and game-player views include `avatar_id`; local mode uses a deterministic catalog assignment.
 
-- [ ] Add `test_catalog_has_ten_distinct_identities`, `test_avatar_survives_slot_reordering`, `test_disconnect_reserves_live_avatar`, `test_waiting_spectator_gets_identity_before_start`, and `test_history_does_not_steal_active_identity`.
-- [ ] Add HUD bounds checks for 7–10 players and render smoke cases for 1–11 simultaneous flame owners including neutral. Verify full result history and exactly one local YOU marker.
-- [ ] Produce three duck costume silhouettes at 32/38/44/52 px tiles and four facings, then review at actual size before expanding the chosen style to ten. Keep the user's selected duck/color/costume direction; treat the individual candidate accessories as proposals for review.
-- [ ] Implement shared art/catalog, server-assigned identities, compact rows, bounded flame visuals, and scrollable room roster. Keep identical gameplay stats and no character-selection feature.
-- [ ] Run character/room/online/results checks. Visually check existing map backgrounds, grayscale, dense explosions, elimination, victory, long names, and ten slots. Confirm the broad bill/front remains visible when accessories rotate.
-- [ ] Commit: `feat(characters): add distinct duck identities and ten-player HUD`.
+- [x] Add `test_catalog_has_ten_distinct_identities`, `test_avatar_survives_slot_reordering`, `test_disconnect_reserves_live_avatar`, `test_waiting_spectator_gets_identity_before_start`, and `test_history_does_not_steal_active_identity`.
+- [x] Add HUD bounds checks for 7–10 players and render smoke cases for 1–11 simultaneous flame owners including neutral. Verify full result history and exactly one local YOU marker.
+- [x] Produce three duck costume silhouettes at 32/38/44/52 px tiles and four facings, then review at actual size before expanding the chosen style to ten. Keep the user's selected duck/color/costume direction; treat the individual candidate accessories as proposals for review.
+- [x] Implement shared art/catalog, server-assigned identities, compact rows, bounded flame visuals, and scrollable room roster. Keep identical gameplay stats and no character-selection feature.
+- [x] Run character/room/online/results checks; silhouette study and static ten-slot/map inspections recorded.
+- [ ] Complete the contextual visual matrix: existing map backgrounds, grayscale, dense explosions, elimination, victory, long names, and ten slots. Confirm the broad bill/front remains visible when accessories rotate.
+- [x] Commit: `feat(characters): add distinct duck identities and ten-player HUD`.
 
 ### Task D: Enable and transport ten-player rooms
 
+**Task status:** Implemented/reviewed; ten-client admission, slot-nine controls, lifecycle/score tests and README coverage pass. Commit deferred by instruction.
+
 **Files:** Modify `scripts/room_registry.gd`, `scripts/room_server.gd`, `scripts/room_client.gd`, `scripts/online_app.gd`, `scripts/lobby_art.gd`, `scripts/arena.gd`, `tests/rooms_test.gd`, `tests/network_test.gd`, `tests/online_test.gd`, `tests/connection_test.gd`, `tests/results_test.gd`, and `README.md`.
 
-- [ ] Add admission cases accepting the tenth and rejecting the eleventh connected participant, including spectators, offline history, and a join after departure. Preserve the six-character code and current nickname suffix behavior.
-- [ ] Extend loopback integration to ten clients and verify the tenth client's movement/bomb ownership, the 11th-client full-room error, countdown/cancellation, host departure, results, and rematch with preserved scores/identities.
-- [ ] Raise `MAX_CONNECTED` to 10 only after Tasks A–C pass. Update capacity copy and assertions without globally replacing every occurrence of `6`; the room code and blast-range cap are unrelated.
-- [ ] Rerun all affected checks, including original-plan input/feedback/connection checks with slot 9. Update README to describe the actual supported profiles and local two-player controls.
-- [ ] Commit: `feat(rooms): allow up to ten online players`.
+- [x] Add admission cases accepting the tenth and rejecting the eleventh connected participant, including spectators, offline history, and a join after departure. Preserve the six-character code and current nickname suffix behavior.
+- [x] Extend loopback integration to ten clients and verify the tenth client's movement/bomb ownership, the 11th-client full-room error, countdown/cancellation, host departure, results, and rematch with preserved scores/identities.
+- [x] Raise `MAX_CONNECTED` to 10 only after Tasks A–C pass. Update capacity copy and assertions without globally replacing every occurrence of `6`; the room code and blast-range cap are unrelated.
+- [x] Rerun all affected checks, including original-plan input/feedback/connection checks with slot 9. Update README to describe the actual supported profiles and local two-player controls.
+- [ ] Commit: `feat(rooms): allow up to ten online players`. **Deferred by instruction: leave the working tree uncommitted; not an implementation blocker.**
 
 ### Task E: Capacity and readability acceptance
 
+**Task status:** Technical suite, native all-map/profile captures, bounded hybrid Web lifecycle/resize coverage, soak and measured RTT/chain evidence complete. Performance goals are measured, not all met; human readability/fairness and final expansion sign-off remain open.
+
 **Files:** Record actual validation in the original plan's playtest document; add a focused `tests/ten_player_test.gd` and UID for repeatable stress/regression scenarios where existing files do not fit.
 
-- [ ] Run every `tests/*_test.gd` using the full-suite command in the original plan. Require no failures. Ensure malformed or mismatched snapshot geometry does not crash client rendering.
-- [ ] Exercise counts 2, 6, 8, and 10 across all five maps through countdown/play/results/rematch. Test both minimum viewport and browser resizing; inspect that frame, HUD, warnings, avatars, and footer fit.
-- [ ] Measure ten-client server tick time, per-peer serialized bytes/second, aggregate room outbound bytes, browser frame time, and input/snapshot delay under normal play and 50-bomb/range-6 chain stress. Record device/build details. Aim for p95 server work below a 16.7 ms frame budget and 60 fps client rendering on the selected reference device; these are proposed measured targets, not current performance claims.
-- [ ] Run a 10-minute automated room soak with repeated rematches, disconnects, joins, and host changes. Check bounded event queues and no growth caused by retaining presentation history across rounds. Historical scoreboard records may grow by design; separate that from leaked transient state.
-- [ ] Repeat the original 0/100/150 ms RTT and jitter checks with ten clients. Optimize only a measured bottleneck; do not introduce compression/delta protocols or lower simulation fidelity speculatively.
+- [x] Run every `tests/*_test.gd` using the full-suite command in the original plan. Require no failures. Ensure malformed or mismatched snapshot geometry does not crash client rendering.
+- [x] Exercise counts 2, 6, 8, and 10 across all five maps through automated countdown/play/results/rematch and native render captures. Hybrid Web lifecycle covers all five maps at 2/6/8; latest ten-client Lily/Frost cycles and 960×704/1280×900 resizing are recorded. These are bounded technical checks, not all-Web or human coverage.
+- [x] Measure ten-client server tick time, per-peer serialized bytes/second, aggregate room outbound bytes, browser frame time, and input/snapshot delay under normal play and 50-bomb/range-6 chain stress. Record device/build details. Aim for p95 server work below a 16.7 ms frame budget and 60 fps client rendering on the selected reference device; these are proposed measured targets, not current performance claims.
+- [x] Run a 10-minute automated room soak with repeated rematches, disconnects, joins, and host changes. Check bounded event queues and no growth caused by retaining presentation history across rounds. Historical scoreboard records may grow by design; separate that from leaked transient state.
+- [x] Repeat the original 0/100/150 ms RTT and jitter checks with ten clients. Optimize only a measured bottleneck; do not introduce compression/delta protocols or lower simulation fidelity speculatively.
 - [ ] Playtest with up to ten actual people: can each locate their duck immediately after GO, identify others without color alone, read the bill/facing, and understand crowded eliminations? Record wrong-character reports, early spawn deaths, first encounters, round duration, and spectator waiting time. Ten windows are technical coverage, not a ten-person usability result.
 - [ ] Verify M6's ice pattern/sliding cues and gradual Nightfall outer fade remain readable at ten-player display scale. Preserve the fully clear Nightfall radius in tile units and unchanged slide mechanics. Record remaining character-style or larger-map fairness feedback before declaring the expansion ready.
 

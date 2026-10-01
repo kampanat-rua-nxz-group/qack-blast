@@ -69,15 +69,19 @@ func sample(now: float) -> Dictionary:
 	var duration := float(right.round_elapsed) - float(left.round_elapsed)
 	var weight := clampf((time - float(left.round_elapsed)) / duration, 0.0, 1.0) if duration > 0.0 else 1.0
 	var positions: Array[Vector2] = []
+	var sliding: Array[bool] = []
 	for i in range(latest.players.size()):
 		var player: Dictionary = latest.players[i]
 		var pos := _vector(player.pos)
 		var direction := Vector2.ZERO
+		var gliding := false
 		if player.alive and not latest.get("round_over", false):
 			var segment := _along_segment(left.players[i], right.players[i], weight)
 			pos = segment.pos
 			direction = segment.direction
+			gliding = _sample_sliding(left.players[i], right.players[i], weight)
 		positions.append(pos)
+		sliding.append(gliding)
 		if i >= last_positions.size():
 			facing.append(float(player.facing))
 			walk_phase.append(0.0)
@@ -89,7 +93,7 @@ func sample(now: float) -> Dictionary:
 			else:
 				walk_phase[i] = 0.0
 	last_positions = positions.duplicate()
-	return {"round_id": round_id, "positions": positions, "facing": facing.duplicate(), "walk_phase": walk_phase.duplicate()}
+	return {"round_id": round_id, "positions": positions, "facing": facing.duplicate(), "walk_phase": walk_phase.duplicate(), "sliding": sliding}
 
 
 func _along_segment(left: Dictionary, right: Dictionary, weight: float) -> Dictionary:
@@ -126,3 +130,22 @@ func _axis_aligned(a: Vector2, b: Vector2) -> bool:
 
 func _vector(value: Array) -> Vector2:
 	return Vector2(value[0], value[1])
+
+
+func _sample_sliding(left: Dictionary, right: Dictionary, weight: float) -> bool:
+	# Flags describe outgoing authority segments. Crossing a received tile-center
+	# boundary switches pose at that center, including a slide ending on dry floor.
+	var before := bool(left.get("sliding", false))
+	var after := bool(right.get("sliding", false))
+	if weight >= 1.0:
+		return after
+	if before == after:
+		return before
+	var start := _vector(left.pos)
+	var end := _vector(right.pos)
+	var boundary := _vector(left.move_target)
+	if boundary == Vector2.ZERO:
+		return before
+	var first := start.distance_to(boundary)
+	var total := first + boundary.distance_to(end)
+	return before if total * weight < first else after
