@@ -243,23 +243,20 @@ static func travel_ticks(observation: Dictionary, start: Vector2, end: Vector2) 
 	var distance := start.distance_to(end)
 	if distance < EPS:
 		return 0
-	var direction := (end - start) / distance
-	var cuts: Array = [0.0, distance]
-	var cell: float = observation.geometry.cell
-	# Split at each terrain boundary; speed applies where the duck's centre is.
+	# ArenaGame samples terrain once per variable engine slice. A water-to-dry
+	# crossing can retain water speed for the whole remaining segment, so summing
+	# ideal per-terrain durations is not an upper bound. Use the slowest traversed
+	# terrain speed for the full cardinal segment, independent of future slices.
 	var low := tile_at(observation, start.min(end))
 	var high := tile_at(observation, start.max(end))
-	for index in range((low.x if direction.x != 0.0 else low.y) + 1, (high.x if direction.x != 0.0 else high.y) + 1):
-		var boundary: float = (observation.geometry.origin.x if direction.x != 0.0 else observation.geometry.origin.y) + index * cell
-		cuts.append(absf(boundary - (start.x if direction.x != 0.0 else start.y)))
-	cuts.sort()
-	var seconds := 0.0
-	for i in range(cuts.size() - 1):
-		var tile := tile_at(observation, start + direction * ((cuts[i] + cuts[i + 1]) * 0.5))
-		if not inside(observation.terrain, tile) or observation.terrain[tile.y][tile.x] == -1:
-			return 121
-		seconds += (cuts[i + 1] - cuts[i]) / Rules.movement_speed_for(observation.wall_mode, observation.terrain[tile.y][tile.x], observation.self.speed_bonus)
-	return ceili(seconds / QUANTUM - EPS)
+	var slowest := INF
+	for y in range(low.y, high.y + 1):
+		for x in range(low.x, high.x + 1):
+			var tile := Vector2i(x, y)
+			if not inside(observation.terrain, tile) or observation.terrain[y][x] == -1:
+				return 121
+			slowest = minf(slowest, Rules.movement_speed_for(observation.wall_mode, observation.terrain[y][x], observation.self.speed_bonus))
+	return ceili(distance / slowest / QUANTUM - EPS)
 
 
 static func solid_at(observation: Dictionary, projection: Dictionary, position: Vector2, time: float, egress: bool) -> bool:

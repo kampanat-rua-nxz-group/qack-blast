@@ -15,6 +15,7 @@ func _initialize() -> void:
 	test_hazard_forecast()
 	test_route_wait_and_margin()
 	test_pond_route_duration()
+	test_pond_committed_water_exit_deadline()
 	test_frost_committed_slide()
 	test_own_bomb_egress()
 	test_unknown_and_budget()
@@ -344,11 +345,39 @@ func test_pond_route_duration() -> void:
 	game.terrain[1][2] = 1
 	var o := observe(game)
 	var r: Dictionary = nav.find_route(o, nav.forecast(o), [Vector2i(2, 1)])
-	check(r.found and is_equal_approx(r.arrival_times.back(), 0.65), "Lily split dry/water duration rounds 26/94 + 26/75.2 up to .65")
+	check(r.found and is_equal_approx(r.arrival_times.back(), 0.70), "Lily mixed terrain bounds whole crossing at water speed: 52/75.2 rounds up to .70")
 	game.players[0].speed_bonus = 0.5
 	o = observe(game)
 	r = nav.find_route(o, nav.forecast(o), [Vector2i(2, 1)])
-	check(r.found and is_equal_approx(r.arrival_times.back(), 0.45), "Lily speed upgrade changes both halves of the crossing")
+	check(r.found and is_equal_approx(r.arrival_times.back(), 0.50), "Lily speed upgrade changes safe mixed-terrain bound: 52/112.8 rounds up to .50")
+
+
+func test_pond_committed_water_exit_deadline() -> void:
+	var nav = navigation()
+	if nav == null:
+		return
+	var game = make_open_game("pond")
+	for y in range(1, game.HEIGHT - 1):
+		for x in range(1, game.WIDTH - 1):
+			game.board[y][x] = game.OPEN
+			game.terrain[y][x] = 0
+	game.terrain[1][1] = 1
+	game.players[0].pos = game.center(Vector2i(2, 1)) - Vector2(27.75, 0)
+	game.players[1].pos = game.center(Vector2i(11, 9))
+	game.move_targets[0] = game.center(Vector2i(2, 1))
+	var o := observe(game)
+	var r: Dictionary = nav.find_route(o, nav.forecast(o), [Vector2i(2, 2)])
+	check(r.found and r.arrival_times == [0.0, 0.4, 1.0], "committed water exit bounds 27.75/75.2 before dry second leg")
+	game.hazards = [{"kind": "closing_walls", "tiles": [Vector2i(2, 1)], "time": 0.91}]
+	o = observe(game)
+	check(not nav.find_route(o, nav.forecast(o), [Vector2i(2, 2)]).found, "water exit cannot prove escape before .91 known closure")
+	# The old integrated bound advertised .30 then .90 arrivals. Engine slices
+	# retain their starting terrain speed, so the first leg has not ended at .30.
+	game.step(0.3, [Vector2.RIGHT, Vector2.ZERO], [false, false])
+	check(game.players[0].pos.distance_to(game.center(Vector2i(2, 1))) > 5.0, "actual .30 slice leaves committed water exit unfinished")
+	game.step(0.6, [Vector2.DOWN, Vector2.ZERO], [false, false])
+	game.step(0.011, [Vector2.DOWN, Vector2.ZERO], [false, false])
+	check(not game.players[0].alive, "actual advertised .30/.90 route dies to .91 closure")
 
 
 func test_frost_committed_slide() -> void:
