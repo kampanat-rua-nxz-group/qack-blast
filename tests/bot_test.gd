@@ -31,6 +31,7 @@ func _initialize() -> void:
 	test_difficulty_tactics()
 	test_controller_fairness()
 	test_controller_reset()
+	test_prediction_legal_timing()
 	print("Bot checks: %d failure(s)" % failures)
 	quit(1 if failures else 0)
 
@@ -778,3 +779,65 @@ func test_controller_reset() -> void:
 	check(bot.opponent_tiles(o).is_empty(), "invisible opponent forgotten")
 	o.players = [{"slot": 1, "pos": o.geometry.origin + Vector2(3.5, 3.5) * o.geometry.cell}]
 	check(bot.opponent_tiles(o)[0].size() == 1, "reappearing duck has no stale velocity")
+
+
+func moving_prediction(bot, game, start: Vector2i, motion: Vector2 = Vector2.RIGHT) -> Array:
+	var o := observe(game)
+	var current: Vector2 = game.center(start)
+	var public := {"slot": 1, "pos": current - motion * 18.8, "speed_bonus": 0.0, "can_kick": false, "range": 1, "bomb_limit": 1, "vision": 2}
+	o.players = [public]
+	o.round_elapsed = 0.0
+	bot.opponent_tiles(o)
+	o.players[0].pos = current
+	o.round_elapsed = 0.1
+	return bot.opponent_tiles(o)
+
+
+func test_prediction_legal_timing() -> void:
+	var game = make_open_game()
+	for y in range(1, game.HEIGHT - 1):
+		for x in range(1, game.WIDTH - 1):
+			game.board[y][x] = game.WALL
+	for x in range(1, game.WIDTH - 1):
+		game.board[3][x] = game.OPEN
+	game.bombs = [test_bomb(Vector2i(4, 3), 2.5, 0)]
+	var bot = controller("extreme")
+	if bot == null:
+		return
+	var predicted := moving_prediction(bot, game, Vector2i(3, 3))
+	check(not predicted[0].has(Vector2i(5, 3)), "visible corridor bomb blocks beyond-bomb prediction")
+	game.bombs.clear()
+	bot.reset()
+	predicted = moving_prediction(bot, game, Vector2i(3, 3))
+	check(predicted[0].has(Vector2i(6, 3)) and not predicted[0].has(Vector2i(7, 3)), "unique predicted exits stay strictly within one-second travel horizon")
+	game.players[0].range = 0
+	var o := observe(game)
+	check(bot.placement_score(o, Vector2i(7, 3), predicted) <= 0.0, "exit scoring cannot add over-horizon neighbor ring")
+	game.hazards = [{"kind": "closing_walls", "tiles": [Vector2i(4, 3)], "time": 0.2}]
+	bot.reset()
+	predicted = moving_prediction(bot, game, Vector2i(3, 3))
+	check(not predicted[0].has(Vector2i(5, 3)), "warned closure blocks timed prediction")
+	game.hazards.clear()
+	game.wall_mode = "pond"
+	for x in range(1, game.WIDTH - 1):
+		game.terrain[3][x] = 1
+	bot.reset()
+	predicted = moving_prediction(bot, game, Vector2i(3, 3))
+	check(predicted[0].has(Vector2i(4, 3)) and not predicted[0].has(Vector2i(5, 3)), "public Lily terrain bounds opponent prediction time")
+	game.wall_mode = "frost"
+	for x in range(1, game.WIDTH - 1):
+		game.terrain[3][x] = 0
+	game.terrain[3][4] = 2
+	game.board[4][4] = game.OPEN
+	bot.reset()
+	predicted = moving_prediction(bot, game, Vector2i(3, 3))
+	check(predicted[0].has(Vector2i(5, 3)) and not predicted[0].has(Vector2i(4, 4)), "compulsory ice continuation cannot branch at intermediate tile")
+	check(not predicted[0].has(Vector2i(4, 3)), "slide intermediate is not an available stationary exit")
+	# Reaching a previously chosen attack goal cannot bypass fresh placement proof.
+	game = make_open_game()
+	game.players[0].pos = game.center(Vector2i(4, 3))
+	game.players[1].pos = game.center(Vector2i(4, 1))
+	game.board[3][3] = game.CRATE
+	game.hazards = [{"kind": "closing_walls", "tiles": [Vector2i(4, 3)], "time": 0.1}]
+	bot = controller("hard")
+	check(not bot.advance(0.0, observe(game)).plant, "unsafe actual attack arrival refuses planting")

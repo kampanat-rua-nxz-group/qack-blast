@@ -278,22 +278,36 @@ func opponent_tiles(o: Dictionary) -> Array:
 			var elapsed: float = o.round_elapsed - previous.time
 			var displacement: Vector2 = player.pos - previous.pos
 			if elapsed > 0.0 and displacement.length() > 0.01:
-				var speed := minf(displacement.length() / elapsed, Rules.SPEED * 1.5)
-				var distance := floori(speed * _profile.prediction_seconds / o.geometry.cell)
-				var branch: Array = [{"tile": tile, "depth": 0}]
-				var visited := {tile: true}
+				# Use the same timed edge checks as our own route search. The
+				# opponent's public upgrade data supplies speed; hidden movement
+				# targets and queued input are deliberately unavailable.
+				var prediction := o.duplicate(true)
+				prediction.self = {"pos": player.pos, "tile": tile,
+					"speed_bonus": player.get("speed_bonus", 0.0), "can_kick": player.get("can_kick", false),
+					"range": player.get("range", 1), "bomb_limit": player.get("bomb_limit", 1),
+					"vision": player.get("vision", 2), "alive": true,
+					"move_target": Vector2.ZERO, "slide": false,
+					"safe_bomb": Nav.INVALID_TILE}
+				var projection := Nav.forecast(prediction)
+				var time_left := maxf(0.0, _profile.prediction_seconds - elapsed)
+				var max_tick := mini(120, floori(time_left / Nav.QUANTUM + 0.000001))
+				var branch: Array = [{"tile": tile, "tick": 0}]
+				var best_tick := {tile: 0}
 				var index := 0
 				while index < branch.size():
 					var node: Dictionary = branch[index]
 					index += 1
-					if node.depth >= distance:
-						continue
+					var position: Vector2 = Nav.center(prediction, node.tile)
 					for direction in Rules.DIRECTIONS:
-						var next: Vector2i = node.tile + direction
-						if not visited.has(next) and Nav.inside(o.board, next) and o.board[next.y][next.x] == Rules.OPEN:
-							visited[next] = true
-							candidates.append(next)
-							branch.append({"tile": next, "depth": node.depth + 1})
+						var target := Nav.center(prediction, node.tile + direction)
+						var edge := Nav.movement_edge(prediction, projection, position, target, node.tick, false)
+						if edge.is_empty() or edge.tick > max_tick:
+							continue
+						var next_tile: Vector2i = edge.tile
+						if not best_tick.has(next_tile) or edge.tick < best_tick[next_tile]:
+							best_tick[next_tile] = edge.tick
+							candidates.append(next_tile)
+							branch.append({"tile": next_tile, "tick": edge.tick})
 		result.append(candidates)
 		fresh[player.slot] = {"pos": player.pos, "time": o.round_elapsed}
 	_history = fresh
@@ -329,10 +343,15 @@ func placement_score(o: Dictionary, tile: Vector2i, predicted: Array, baseline: 
 				# Count pressure on every legal predicted exit, including visible
 				# bombs' rays. Existing bombs therefore affect successive tactics.
 				var exits: Array = [opponent]
-				for direction in Rules.DIRECTIONS:
-					var exit: Vector2i = opponent + direction
-					if Nav.inside(o.board, exit) and o.board[exit.y][exit.x] == Rules.OPEN:
-						exits.append(exit)
+				# Once a visible displacement history exists, `predicted` is the
+				# timed reachable set; do not invent a one-tile exit beyond it. In
+				# the first observation, score the opponent's immediately adjacent
+				# exits as the conservative unpredicted set.
+				if _history.is_empty():
+					for direction in Rules.DIRECTIONS:
+						var exit: Vector2i = opponent + direction
+						if Nav.inside(o.board, exit) and o.board[exit.y][exit.x] == Rules.OPEN:
+							exits.append(exit)
 				var before := 0
 				var after := 0
 				for exit in exits:
