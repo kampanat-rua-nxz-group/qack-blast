@@ -87,7 +87,127 @@ func _initialize() -> void:
 	test_event_cursor_late_join_and_reset()
 	test_disconnect_expiry_event_and_cause()
 	test_room_events_are_bounded()
+	test_solo_bot_start()
+	test_bot_host_permissions()
+	test_bot_capacity()
+	test_bot_disconnect_lifecycle()
+	test_bot_scores_and_readd()
+	test_bot_countdown_reset()
+	test_bot_input_not_expired()
+	test_bot_metadata_roundtrip()
 	finish()
+
+
+func bot_room(registry):
+	var created: Dictionary = registry.create_room(100, "Solo")
+	return [created, registry.rooms.get(created.get("code", ""), {})]
+
+
+func test_solo_bot_start() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	var pair: Array = bot_room(registry)
+	var created: Dictionary = pair[0]
+	check(not registry.start_round(100), "one human cannot start alone")
+	var added: Dictionary = registry.add_bot(100)
+	check(added.ok and registry.start_round(100), "host adds default Medium bot and starts solo countdown")
+	var room: Dictionary = pair[1]
+	check(room.game.player_count == 2 and room.phase == "countdown", "solo lineup has two players")
+	registry.tick(2.9)
+	check(room.phase == "countdown" and room.game.round_elapsed == 0.0, "bot does not act before GO")
+	registry.tick(0.11)
+	check(room.phase == "playing", "solo room enters active play after countdown")
+
+
+func test_bot_host_permissions() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	var pair: Array = bot_room(registry)
+	var created: Dictionary = pair[0]
+	registry.join_room(200, created.code, "Guest")
+	check(not registry.add_bot(200).ok and registry.add_bot(100).ok, "only host can add bot")
+	var bot: Dictionary = pair[1].people.back()
+	check(not registry.set_bot_difficulty(200, bot.id, "hard").ok, "guest cannot change bot difficulty")
+	check(not registry.add_bot(100).ok, "second bot is rejected")
+	check(registry.start_round(100), "human plus bot and guest can start")
+	check(not registry.remove_bot(100, bot.id).ok and not registry.set_bot_difficulty(100, bot.id, "hard").ok, "active-round bot mutations are rejected")
+
+
+func test_bot_capacity() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	var pair: Array = bot_room(registry)
+	var created: Dictionary = pair[0]
+	registry.add_bot(100)
+	for peer_id in range(200, 208):
+		check(registry.join_room(peer_id, created.code, "Guest").ok, "join within bot seat capacity")
+	check(not registry.join_room(208, created.code, "Full").ok, "bot counts toward ten-seat capacity")
+	check(registry.admission_count(pair[1]) == 10, "admission count includes connected humans and bot")
+	registry.leave(207)
+	check(registry.join_room(208, created.code, "Replacement").ok, "offline human history does not consume admission seat")
+
+
+func test_bot_disconnect_lifecycle() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	var pair: Array = bot_room(registry)
+	var created: Dictionary = pair[0]
+	var room: Dictionary = pair[1]
+	registry.add_bot(100)
+	var bot: Dictionary = room.people.back()
+	registry.start_round(100)
+	registry.tick(3.0)
+	check(bot.peer == 0 and bot.disconnect_remaining == 0.0 and room.host == room.people[0].id, "bot never gets disconnect grace or host rights")
+	registry.leave(100)
+	check(not registry.rooms.has(created.code), "last human departure deletes room while bot is active")
+
+
+func test_bot_scores_and_readd() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	var pair: Array = bot_room(registry)
+	var room: Dictionary = pair[1]
+	registry.add_bot(100)
+	var first: Dictionary = room.people.back()
+	check(registry.set_bot_difficulty(100, first.id, "extreme").ok, "difficulty change succeeds")
+	first.scores.kills = 3
+	check(registry.remove_bot(100, first.id).ok, "host removes bot in lobby")
+	var added: Dictionary = registry.add_bot(100, "easy")
+	var replacement: Dictionary = room.people.back()
+	check(added.ok and replacement.id != first.id and replacement.scores == {"wins": 0, "kills": 0}, "re-added bot has fresh identity and scores")
+
+
+func test_bot_countdown_reset() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	var pair: Array = bot_room(registry)
+	var room: Dictionary = pair[1]
+	registry.add_bot(100)
+	registry.start_round(100)
+	registry.leave(100)
+	check(room.phase == "lobby" and room.get("bot_controllers", {}).is_empty(), "cancelled lineup clears bot controllers")
+
+
+func test_bot_input_not_expired() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	var pair: Array = bot_room(registry)
+	var room: Dictionary = pair[1]
+	registry.add_bot(100)
+	registry.start_round(100)
+	registry.tick(3.0)
+	var bot_slot: int = room.people.back().slot
+	registry.tick(0.0) # first GO decision schedules the next reaction deadline
+	room.directions[bot_slot] = Vector2.RIGHT
+	room.input_remaining[bot_slot] = 0.0
+	registry.tick(0.21)
+	check(room.directions[bot_slot] == Vector2.RIGHT, "bot held movement is independent of human input expiry")
+	registry.leave(100)
+	check(not registry.rooms.has(room.code), "room cleanup after human leaves")
+
+
+func test_bot_metadata_roundtrip() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	var pair: Array = bot_room(registry)
+	var room: Dictionary = pair[1]
+	registry.add_bot(100)
+	var view: Dictionary = JSON.parse_string(JSON.stringify(registry.room_view(room)))
+	var bot: Dictionary = view.people.back()
+	check(not bot.connected and bot.kind == "bot" and bot.difficulty == "medium", "bot snapshot retains kind, difficulty, and transport disconnected state")
+	check(view.ready_player_count == 2 and registry.ready_people(room).size() == 2, "snapshot exposes authoritative ready player count")
 
 
 func test_map_round_snapshots() -> void:
