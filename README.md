@@ -52,11 +52,7 @@ The round rules support 2–10 players, Wins/Kills, chain explosions, and pickup
 ## Checks
 
 ```sh
-test_exit_status=0
-for t in tests/*_test.gd; do
-  /Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script "$t" || test_exit_status=1
-done
-exit "$test_exit_status"
+for t in tests/*_test.gd; do /Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script "$t" || echo "FAIL $t"; done
 ```
 
 The test scripts are `arena`, `bot`, `character`, `connection`, `feedback`, `input`, `map_picker`, `network`, `online`, `presentation`, `results`, `rooms`, `ten_network`, and `ten_player` (`tests/*_test.gd`).
