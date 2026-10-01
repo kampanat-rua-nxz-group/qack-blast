@@ -30,6 +30,7 @@ var roster_people: Array = []
 var roster_person_id := -1
 var status_label: Label
 var start_button: Button
+var bot_add_button: Button
 var map_button: Button
 var map_picker: Control
 var leave_button: Button
@@ -80,6 +81,9 @@ func _ready() -> void:
 	results.hide()
 	results.change_map_requested.connect(_change_map)
 	results.play_again_requested.connect(func(): client.send({"type": "start"}))
+	results.bot_add_requested.connect(func(): client.send({"type": "bot_add", "difficulty": "medium"}))
+	results.bot_remove_requested.connect(func(person_id): client.send({"type": "bot_remove", "person_id": person_id}))
+	results.bot_difficulty_requested.connect(func(person_id, difficulty): client.send({"type": "bot_difficulty", "person_id": person_id, "difficulty": difficulty}))
 	results.leave_requested.connect(_leave_room)
 	map_picker = MapPicker.new()
 	add_child(map_picker)
@@ -228,8 +232,19 @@ func build_waiting_card() -> void:
 	var copy_button := Ui.button(column, "COPY CODE", 47, Color("e7f2ed"), Color("366b68"))
 	copy_button.name = "CopyCodeButton"
 	copy_button.pressed.connect(_copy_code)
+	var room_actions := HBoxContainer.new()
+	room_actions.add_theme_constant_override("separation", 8)
+	column.add_child(room_actions)
+	column.move_child(room_actions, column.get_child_count() - 2)
+	column.remove_child(copy_button)
+	room_actions.add_child(copy_button)
+	bot_add_button = Ui.button(room_actions, "ADD BOT · MEDIUM", 40, Color("e7f2ed"), Color("366b68"))
+	bot_add_button.name = "AddBotButton"
+	bot_add_button.custom_minimum_size.x = 150
+	bot_add_button.disabled = true
+	bot_add_button.pressed.connect(func(): client.send({"type": "bot_add", "difficulty": "medium"}))
 	Ui.spacer(column, 8)
-	Ui.label(column, "The host starts the round once 2–10 players have joined.", 13, Ui.MUTED)
+	Ui.label(column, "The host starts when 2–10 players have joined. Add a bot to play solo.", 13, Ui.MUTED)
 
 
 func _copy_code() -> void:
@@ -357,19 +372,25 @@ func _room_changed(room: Dictionary) -> void:
 	_render_roster(room.people)
 	var host: bool = room.host == client.person_id
 	var connected_count := 0
+	var has_bot := false
 	for person in room.people:
 		if person.connected:
 			connected_count += 1
+		if person.get("kind", "human") == "bot":
+			has_bot = true
+	var ready_count: int = int(room.get("ready_player_count", connected_count))
 	map_button.disabled = playing or countdown
 	map_picker.present(room.wall_mode, host and not playing and not countdown)
 	if playing or countdown:
 		map_picker.hide()
-	start_button.disabled = not host or playing or countdown or connected_count < 2
+	start_button.disabled = not host or playing or countdown or ready_count < 2
+	bot_add_button.visible = host and not has_bot
+	bot_add_button.disabled = not host or playing or countdown or has_bot or ready_count >= 10
 	leave_button.disabled = false
 	if room.phase == "results" and not client.game.is_empty():
 		status_label.text = "Round over: %s. The host can start another round." % arena.round_result_text()
 	elif room.phase == "lobby":
-		status_label.text = room.get("notice", "") if not room.get("notice", "").is_empty() else "Waiting for 2–10 players."
+		status_label.text = room.get("notice", "") if not room.get("notice", "").is_empty() else "Waiting for players. Add a bot to start solo."
 	elif (playing or countdown) and not matched:
 		status_label.text = "Preparing the next round…"
 	elif countdown:
@@ -585,13 +606,18 @@ func _render_roster(people: Array) -> void:
 		roster_rows.remove_child(row)
 		row.queue_free()
 	for person in people:
-		var row := HBoxContainer.new()
+		var row := VBoxContainer.new()
+		row.name = "RosterRow"
 		roster_rows.add_child(row)
+		var identity_row := HBoxContainer.new()
+		row.add_child(identity_row)
 		var look := CharacterCatalog.appearance(person.get("avatar_id", -1))
-		row.add_child(DuckArt.portrait(look,32.0))
-		var name := "%s · %s%s%s" % [look.badge,person.name," (YOU)" if person.id == client.person_id else ""," (offline)" if not person.connected else ""]
+		identity_row.add_child(DuckArt.portrait(look,32.0))
+		var is_bot: bool = person.get("kind", "human") == "bot"
+		var name := "%s · %s%s%s%s" % [look.badge,person.name," (YOU)" if person.id == client.person_id else ""," · BOT · %s" % bot_difficulty_label(person.get("difficulty", "medium")) if is_bot else ""," (offline)" if not person.connected and not is_bot else ""]
 		var label := Label.new()
-		row.add_child(label)
+		label.name = "RosterName"
+		identity_row.add_child(label)
 		label.text = name
 		label.add_theme_font_size_override("font_size",14)
 		label.add_theme_color_override("font_color",Ui.NAVY)
@@ -599,3 +625,33 @@ func _render_roster(people: Array) -> void:
 		label.clip_text = true
 		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		label.tooltip_text = name
+		if is_bot:
+			var bot_actions := HBoxContainer.new()
+			bot_actions.add_theme_constant_override("separation", 6)
+			row.add_child(bot_actions)
+			var selector := make_bot_difficulty(person.get("difficulty", "medium"))
+			selector.name = "BotDifficulty"
+			selector.custom_minimum_size.x = 112
+			selector.disabled = client.room.phase not in ["lobby", "results"] or client.room.host != client.person_id
+			selector.item_selected.connect(func(index: int, id: int = int(person.id), option: OptionButton = selector): client.send({"type": "bot_difficulty", "person_id": id, "difficulty": option.get_item_metadata(index)}))
+			bot_actions.add_child(selector)
+			var remove := Ui.button(bot_actions, "REMOVE BOT", 34, Color("f9e8ed"), Color("92536b"))
+			remove.name = "RemoveBotButton"
+			remove.disabled = selector.disabled
+			remove.visible = client.room.host == client.person_id
+			remove.pressed.connect(func(id: int = int(person.id)): client.send({"type": "bot_remove", "person_id": id}))
+
+
+func make_bot_difficulty(difficulty: String) -> OptionButton:
+	var selector := OptionButton.new()
+	for entry in [["Easy", "easy"], ["Medium", "medium"], ["Hard", "hard"], ["Extreme", "extreme"]]:
+		var index := selector.item_count
+		selector.add_item(entry[0])
+		selector.set_item_metadata(index, entry[1])
+		if entry[1] == difficulty:
+			selector.select(index)
+	return selector
+
+
+func bot_difficulty_label(difficulty: String) -> String:
+	return {"easy": "Easy", "medium": "Medium", "hard": "Hard", "extreme": "Extreme"}.get(difficulty, "Medium")
