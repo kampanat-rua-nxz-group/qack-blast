@@ -21,6 +21,12 @@ Open `http://127.0.0.1:8765` in separate browser windows. One player enters a ni
 
 Sound cues mark bomb placement, explosions, pickups, elimination and round results. Use **Mute** to switch sound off or on; the choice is saved on that device. Browser sound becomes available after interacting with the game.
 
+### Play solo against a bot
+
+Solo play uses the same authoritative room server and lobby as online multiplayer; it is not available in the local two-keyboard scene. Create a room, choose **ADD BOT · MEDIUM**, select a map, and start. The bot occupies the second player seat and follows the normal countdown, rules, scores, and rematch flow. The host can change its difficulty or remove it between rounds. One bot is supported per room; friends can still join and play under the usual ten-seat limit.
+
+**Easy** is for new players, **Medium** for casual solo play, **Hard** for practice, and **Extreme** for experienced players seeking a challenge. These are starting difficulty profiles; Extreme has not received human playtest validation yet.
+
 Connecting shows progress and offers **Cancel**. Temporary failures use bounded retries, then offer **Retry**. After losing a room connection, **Rejoin** keeps the code but creates a new participant; your old duck and score are not recovered.
 
 Each map has its own effect and crate pickup. Classic keeps the bomb-capacity and blast-range upgrades. Random rerolls permanent walls each round and can drop a Mystery item that grants one of those upgrades. Lily Pond starts ducks at half normal speed (94 px/s); its broad shallow-water patches apply a further 20% slowdown (75.2 px/s). Speed items add 25% of the Lily base speed each, capped at a 50% bonus, on dry ground and water. Frost Garden has broad ice patches that slide ducks one extra tile and a Bomb Kick item: walk into a bomb to send it toward the next wall, crate, bomb, or arena edge. Nightfall has a soft spotlight around each duck and a Sight item that widens it. Its permanent walls reshuffle at one and two minutes, avoiding ducks, bombs, and pickups.
@@ -53,8 +59,9 @@ done
 exit "$test_exit_status"
 ```
 
-The test scripts are `arena`, `character`, `connection`, `feedback`, `input`, `map_picker`, `network`, `online`, `presentation`, `results`, `rooms`, `ten_network`, and `ten_player` (`tests/*_test.gd`).
+The test scripts are `arena`, `bot`, `character`, `connection`, `feedback`, `input`, `map_picker`, `network`, `online`, `presentation`, `results`, `rooms`, `ten_network`, and `ten_player` (`tests/*_test.gd`).
 
-`scripts/arena_game.gd` owns the rules; `scripts/room_registry.gd` owns room membership and scores; `scripts/room_server.gd` validates network commands; and `scripts/online_app.gd` renders the lobby and snapshots, using the widget helpers in `scripts/lobby_ui.gd`.
+`scripts/arena_game.gd` owns the rules; `scripts/bot_profiles.gd`, `bot_observation.gd`, `bot_navigation.gd`, and `bot_controller.gd` provide the visibility-limited bot policy; `scripts/room_registry.gd` owns room membership, bot ticking, and scores; `scripts/room_server.gd` validates network commands; and `scripts/online_app.gd` renders the lobby and snapshots, using the widget helpers in `scripts/lobby_ui.gd`.
 
 The [player experience acceptance record](docs/playtests/2026-10-01-player-experience-acceptance.md) records technical validation and outstanding human/performance checks.
+The [solo bot acceptance record](docs/playtests/2026-10-01-solo-bot-acceptance.md) records bot test, benchmark, and playtest status.

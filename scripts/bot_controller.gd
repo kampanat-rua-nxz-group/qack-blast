@@ -95,26 +95,37 @@ func advance(delta: float, observation: Dictionary) -> Dictionary:
 	var best := {}
 	var best_score := -INF
 	if own_bombs < observation.self.bomb_limit:
+		var ranked: Array = []
+		var order := 0
 		for tile in nearby_candidates(observation):
 			_candidates += 1
+			var score := placement_score(observation, tile, predicted, projection)
+			if score > 0.0:
+				ranked.append({"tile": tile, "score": score, "order": order})
+			order += 1
+		ranked.sort_custom(func(a: Dictionary, b: Dictionary):
+			if a.score == b.score:
+				return a.order < b.order
+			return a.score > b.score)
+		for item in ranked:
+			var tile: Vector2i = item.tile
 			var route := route_to(observation, projection, [tile])
 			if not route.found:
 				continue
-			var score := placement_score(observation, tile, predicted, projection)
-			if score > best_score and score > 0.0:
-				# Future candidates are goals only. Placement is proved again from
-				# the actual current tile, never from a hypothetical future duck.
-				if tile == observation.self.tile:
-					var candidate := {"tile": tile, "owner": _slot,
-						"range": observation.self.range, "time": Rules.FUSE}
-					var with_bomb := Nav.forecast(observation, candidate)
-					var escape := scheduled_escape(observation, with_bomb, goals, _next)
-					if not escape.found:
-						continue
-					best = {"plant": true, "route": escape, "horizon": with_bomb.horizon}
-				else:
-					best = {"plant": false, "route": route}
-				best_score = score
+			# Future candidates are goals only. Placement is proved again from
+			# the actual current tile, never from a hypothetical future duck.
+			if tile == observation.self.tile:
+				var candidate := {"tile": tile, "owner": _slot,
+					"range": observation.self.range, "time": Rules.FUSE}
+				var with_bomb := Nav.forecast(observation, candidate)
+				var escape := scheduled_escape(observation, with_bomb, goals, _next)
+				if not escape.found:
+					continue
+				best = {"plant": true, "route": escape, "horizon": with_bomb.horizon}
+			else:
+				best = {"plant": false, "route": route}
+			best_score = item.score
+			break
 	var pickup_goals: Array = []
 	if _profile.candidate_limit > 1:
 		for tile in observation.pickups:
@@ -178,6 +189,8 @@ func nearby_candidates(o: Dictionary) -> Array:
 
 
 func route_to(o: Dictionary, f: Dictionary, goals: Array) -> Dictionary:
+	if o.bombs.is_empty() and o.hazards.is_empty() and o.flames.is_empty():
+		return quick_route(o, f, goals)
 	var route := Nav.find_route(o, f, goals)
 	_expanded += route.expanded_nodes
 	if not route.found or route.tiles.size() < 2:
@@ -186,6 +199,40 @@ func route_to(o: Dictionary, f: Dictionary, goals: Array) -> Dictionary:
 	if route.tiles[1] == route.tiles[0]:
 		return {"found": true, "steps": []}
 	return scheduled_escape(o, f, goals)
+
+
+func quick_route(o: Dictionary, f: Dictionary, goals: Array) -> Dictionary:
+	var failure := {"found": false, "steps": []}
+	if goals.is_empty() or not f.complete:
+		return failure
+	var start: Vector2i = o.self.tile
+	var nodes: Array = [{"tile": start, "tick": 0, "first_direction": Vector2i.ZERO, "first_destination": start}]
+	var seen := {start: true}
+	var index := 0
+	while index < nodes.size():
+		var node: Dictionary = nodes[index]
+		index += 1
+		_expanded += 1
+		if goals.has(node.tile):
+			var steps: Array = []
+			if node.first_direction != Vector2i.ZERO:
+				steps.append({"origin": start, "direction": node.first_direction, "destination": node.first_destination})
+			return {"found": true, "steps": steps}
+		var position: Vector2 = o.self.pos if node.tile == start and node.first_direction == Vector2i.ZERO else Nav.center(o, node.tile)
+		for direction in Rules.DIRECTIONS:
+			var target := Nav.center(o, node.tile + direction)
+			var edge := Nav.movement_edge(o, f, position, target, node.tick, false)
+			if edge.is_empty() or edge.tick > 120:
+				continue
+			var next_tile: Vector2i = edge.tile
+			if seen.has(next_tile):
+				continue
+			seen[next_tile] = true
+			var first_direction: Vector2i = direction if node.first_direction == Vector2i.ZERO else node.first_direction
+			var first_destination: Vector2i = edge.tile if node.first_direction == Vector2i.ZERO else node.first_destination
+			nodes.append({"tile": next_tile, "tick": edge.tick,
+				"first_direction": first_direction, "first_destination": first_destination})
+	return failure
 
 
 func begin_route(route: Dictionary) -> Dictionary:
@@ -270,6 +317,7 @@ func useful_pickup(o: Dictionary, kind: int) -> bool:
 func opponent_tiles(o: Dictionary) -> Array:
 	var result: Array = []
 	var fresh := {}
+	var shared_projection: Dictionary = Nav.forecast(o) if _profile.prediction_seconds > 0.0 else {}
 	for player in o.players:
 		var tile := Nav.tile_at(o, player.pos)
 		var candidates: Array = [tile]
@@ -288,7 +336,7 @@ func opponent_tiles(o: Dictionary) -> Array:
 					"vision": player.get("vision", 2), "alive": true,
 					"move_target": Vector2.ZERO, "slide": false,
 					"safe_bomb": Nav.INVALID_TILE}
-				var projection := Nav.forecast(prediction)
+				var projection: Dictionary = shared_projection
 				var time_left := maxf(0.0, _profile.prediction_seconds - elapsed)
 				var max_tick := mini(120, floori(time_left / Nav.QUANTUM + 0.000001))
 				var branch: Array = [{"tile": tile, "tick": 0}]
