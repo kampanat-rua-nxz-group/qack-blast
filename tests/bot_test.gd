@@ -25,6 +25,12 @@ func _initialize() -> void:
 	test_candidate_committed_rejected()
 	test_slide_blocker_arrival_uncertainty()
 	test_escape_route_engine_survival()
+	test_seeded_reactions()
+	test_no_catchup_actions()
+	test_safe_placement()
+	test_difficulty_tactics()
+	test_controller_fairness()
+	test_controller_reset()
 	print("Bot checks: %d failure(s)" % failures)
 	quit(1 if failures else 0)
 
@@ -589,3 +595,186 @@ func test_escape_route_engine_survival() -> void:
 		while game.round_elapsed < f.horizon - 0.00001:
 			game.step(minf(0.01, f.horizon - game.round_elapsed), [Vector2.ZERO, Vector2.ZERO], [false, false])
 		check(game.players[0].alive and game.tile_at(game.players[0].pos) == Vector2i(3, 1), "route playback survives actual bomb and complete flame lifetime " + mode)
+
+
+func controller(difficulty: String = "medium", seed_value: int = 93):
+	var script = load("res://scripts/bot_controller.gd")
+	check(script != null and script.can_instantiate(), "scheduled controller exists")
+	if script == null or not script.can_instantiate():
+		return null
+	var bot = script.new()
+	check(bot.configure(0, difficulty, seed_value), "configure canonical controller")
+	return bot
+
+
+func test_seeded_reactions() -> void:
+	for difficulty in ["easy", "medium", "hard", "extreme"]:
+		var a = controller(difficulty)
+		var b = controller(difficulty)
+		if a == null or b == null:
+			return
+		var game = make_open_game()
+		var o := observe(game)
+		var p: Dictionary = load("res://scripts/bot_profiles.gd").get_profile(difficulty)
+		for i in range(12):
+			check(a.advance(0.0 if i == 0 else a.diagnostics().next_decision_in, o) == b.advance(0.0 if i == 0 else b.diagnostics().next_decision_in, o), "seeded reaction commands " + difficulty)
+			var d: Dictionary = a.diagnostics()
+			check(d.decision_count == i + 1, "one scheduled decision " + difficulty)
+			check(d.next_decision_in >= p.interval_min and d.next_decision_in <= p.interval_max, "exact sampled interval " + difficulty)
+			check(d == b.diagnostics(), "seeded reaction diagnostics " + difficulty)
+		var held: Dictionary = a.advance(0.0, o)
+		o.hazards = [{"kind": "closing_walls", "tiles": [o.self.tile], "time": 0.01}]
+		var changed: Dictionary = a.advance(0.01, o)
+		check(changed.direction == held.direction and not changed.plant and changed.move_press == Vector2.ZERO, "danger cannot bypass deadline or repeat pulses")
+
+
+func test_no_catchup_actions() -> void:
+	var bot = controller()
+	if bot == null:
+		return
+	var o := observe(make_open_game())
+	bot.advance(0.0, o)
+	var before: int = bot.diagnostics().decision_count
+	bot.advance(5.0, o)
+	check(bot.diagnostics().decision_count == before + 1 and bot.diagnostics().next_decision_in > 0.0, "five second delta has no catchup actions")
+
+
+func test_safe_placement() -> void:
+	var trapped = make_open_game()
+	trapped.players[0].pos = trapped.center(Vector2i(1, 1))
+	trapped.board[1][2] = trapped.CRATE
+	trapped.board[2][1] = trapped.WALL
+	var bot = controller("extreme")
+	if bot == null:
+		return
+	check(not bot.advance(0.0, observe(trapped)).plant, "dead end placement refused")
+	for mode in ["fixed", "pond", "frost"]:
+		for difficulty in ["easy", "medium", "hard", "extreme"]:
+			var game = make_open_game(mode)
+			game.players[0].pos = game.center(Vector2i(1, 1))
+			game.players[1].pos = game.center(Vector2i(11, 9))
+			game.board[2][1] = game.CRATE
+			game.terrain[1][1] = 0
+			game.terrain[1][2] = 1 if mode == "pond" else (2 if mode == "frost" else 0)
+			game.terrain[1][3] = 0
+			bot = controller(difficulty)
+			var command: Dictionary = bot.advance(0.0, observe(game))
+			if mode == "pond" and difficulty == "easy":
+				check(not command.plant, "slow Lily reaction cannot prove this escape")
+				continue
+			check(command.plant, "proven scheduled placement " + mode + difficulty)
+			var planted := 0
+			for tick in range(350):
+				if tick > 0:
+					command = bot.advance(0.01, observe(game))
+				if command.plant:
+					planted += 1
+				game.step(0.01, [command.direction, Vector2.ZERO], [command.plant, false], [command.move_press, Vector2.ZERO])
+			check(game.players[0].alive and planted >= 1, "actual controller commands escape through full flames " + mode + difficulty)
+	# Speed upgrades on dry Lily ground can make the same slow profile safe.
+	var upgraded = make_open_game("pond")
+	upgraded.players[0].pos = upgraded.center(Vector2i(3, 3))
+	upgraded.players[0].speed_bonus = 0.5
+	upgraded.board[4][3] = upgraded.CRATE
+	for y in range(1, upgraded.HEIGHT - 1):
+		for x in range(1, upgraded.WIDTH - 1):
+			upgraded.terrain[y][x] = 0
+	bot = controller("easy", 93)
+	var lily_command: Dictionary = bot.advance(0.0, observe(upgraded))
+	check(lily_command.plant, "Easy can prove upgraded dry Lily escape using sampled deadline")
+	for tick in range(350):
+		if tick > 0:
+			lily_command = bot.advance(0.01, observe(upgraded))
+		upgraded.step(0.01, [lily_command.direction, Vector2.ZERO], [lily_command.plant, false], [lily_command.move_press, Vector2.ZERO])
+	check(upgraded.players[0].alive, "Easy actual upgraded Lily commands survive")
+	# Capacity and a changing complete forecast never authorize a second bomb.
+	var full = make_open_game()
+	full.board[2][1] = full.CRATE
+	full.place_bomb(0)
+	bot = controller("extreme")
+	check(not bot.advance(0.0, observe(full)).plant, "known own bombs conservatively exhaust capacity")
+	var moving = make_open_game("frost")
+	moving.board[2][1] = moving.CRATE
+	moving.move_targets[0] = moving.center(Vector2i(2, 1))
+	moving.slide_active[0] = true
+	bot = controller("extreme")
+	check(not bot.advance(0.0, observe(moving)).plant, "no placement during move or slide")
+
+
+func test_difficulty_tactics() -> void:
+	var game = make_open_game()
+	game.players[0].pos = game.center(Vector2i(3, 3))
+	game.players[1].pos = game.center(Vector2i(4, 2))
+	game.players[0].range = 3
+	game.board[4][3] = game.CRATE
+	# Current tile clears a crate but leaves every opponent exit open. The
+	# adjacent right candidate reaches the opponent and pressures its exits.
+	game.board[2][4] = game.OPEN
+	game.board[2][3] = game.WALL
+	game.board[2][5] = game.WALL
+	for difficulty in ["easy", "medium", "hard", "extreme"]:
+		var bot = controller(difficulty)
+		if bot == null:
+			return
+		var command: Dictionary = bot.advance(0.0, observe(game))
+		var limit: int = load("res://scripts/bot_profiles.gd").get_profile(difficulty).candidate_limit
+		check(bot.diagnostics().candidate_count <= limit, "bounded candidates " + difficulty)
+		if difficulty == "easy":
+			check(bot.diagnostics().candidate_count == 1, "Easy evaluates one nearby position")
+		if difficulty in ["hard", "extreme"]:
+			check(not command.plant and command.move_press == Vector2.RIGHT, "exit pressure preferred over crate " + difficulty)
+
+	var pressure_bot = controller("hard")
+	var pressure_observation := observe(game)
+	var positions: Array = [[Vector2i(4, 2)]]
+	var without: float = pressure_bot.placement_score(pressure_observation, Vector2i(4, 3), positions)
+	pressure_observation.bombs = [{"tile": Vector2i(4, 1), "owner": 1, "range": 0, "time": 2.0}]
+	var combined: float = pressure_bot.placement_score(pressure_observation, Vector2i(4, 3), positions)
+	check(combined > without, "existing visible bomb reduces exits for coordinated new placement")
+
+
+func test_controller_fairness() -> void:
+	var a = observation_game("night")
+	var b = observation_game("night")
+	b.players[1].pos += Vector2(2, 3)
+	b.rng.seed = 9001
+	b.pickups[Vector2i(10, 9)] = 1
+	b.board[8][10] = b.WALL
+	b.move_targets[1] = b.center(Vector2i(9, 9))
+	var ma := {}
+	var mb := {}
+	var ca = controller("extreme")
+	var cb = controller("extreme")
+	if ca == null or cb == null:
+		return
+	var before: Dictionary = {"board": a.board.duplicate(true), "players": a.players.duplicate(true), "bombs": a.bombs.duplicate(true)}
+	var rng_before: int = a.rng.state
+	for tick in range(30):
+		check(ca.advance(0.05, observation(a, ma)) == cb.advance(0.05, observation(b, mb)), "hidden state equal controller sequence")
+	check({"board": a.board, "players": a.players, "bombs": a.bombs} == before and a.rng.state == rng_before, "controller never mutates game or game RNG")
+
+
+func test_controller_reset() -> void:
+	var bot = controller("hard")
+	if bot == null:
+		return
+	var o := observe(make_open_game())
+	bot.advance(0.0, o)
+	for invalid in [{}, {"self": {"alive": false}}, {"round_over": true}]:
+		check(bot.advance(1.0, invalid) == {"direction": Vector2.ZERO, "move_press": Vector2.ZERO, "plant": false}, "invalid dead or round-over neutral")
+	bot.reset()
+	var fresh = controller("hard")
+	check(bot.diagnostics().decision_count == 0 and bot.advance(0.0, o) == fresh.advance(0.0, o) and bot.diagnostics() == fresh.diagnostics(), "reset drops old intent history and clock")
+	check(not bot.configure(0, "extream", 1), "controller rejects invalid profile")
+	# Prediction branches at legal intersections and forgets a vanished duck.
+	bot = controller("extreme")
+	o.players = [{"slot": 1, "pos": o.geometry.origin + Vector2(3.5, 3.5) * o.geometry.cell}]
+	bot.opponent_tiles(o)
+	o.round_elapsed += 0.25
+	o.players[0].pos += Vector2.RIGHT * 47.0
+	var predictions: Array = bot.opponent_tiles(o)
+	check(predictions[0].size() > 2, "visible displacement branches through Extreme horizon")
+	o.players.clear()
+	check(bot.opponent_tiles(o).is_empty(), "invisible opponent forgotten")
+	o.players = [{"slot": 1, "pos": o.geometry.origin + Vector2(3.5, 3.5) * o.geometry.cell}]
+	check(bot.opponent_tiles(o)[0].size() == 1, "reappearing duck has no stale velocity")
