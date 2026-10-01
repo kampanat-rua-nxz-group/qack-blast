@@ -10,6 +10,8 @@ func _initialize() -> void:
 		finish()
 		return
 	Presentation = load("res://scripts/arena_presentation.gd")
+	test_active_slide_stall_and_reset()
+	test_slide_pose_matches_sampled_position()
 	test_interpolation_between_samples()
 	test_close_snapshot_does_not_rewind_display()
 	test_turn_uses_tile_center()
@@ -151,3 +153,46 @@ func test_close_snapshot_does_not_rewind_display() -> void:
 	check(p.sample(10.5).positions[0] == Vector2(72,72), "long gap resets monotonic cursor and displays fresh position immediately")
 	p.push_snapshot(snapshot(5, 0.0, Vector2(120,120), Vector2.ZERO, 2), 10.55)
 	check(p.sample(10.55).positions[0] == Vector2(120,120), "new round resets monotonic cursor to fresh round timing")
+
+
+func test_slide_pose_matches_sampled_position() -> void:
+	var p = Presentation.new()
+	var a := snapshot(1, 1.0, Vector2(110,72), Vector2(120,72))
+	var b := snapshot(2, 1.1, Vector2(130,72), Vector2(168,72))
+	a.players[0].sliding = false
+	b.players[0].sliding = true
+	p.push_snapshot(a, 10.0)
+	p.push_snapshot(b, 10.1)
+	check(not p.sample(10.075).sliding[0], "walking pose before displayed ice center despite newer slide packet")
+	check(p.sample(10.125).sliding[0], "glide pose after displayed ice center")
+	check(p.sample(10.125).sliding[0], "repeated sample keeps matching slide state")
+	var c := snapshot(3, 1.2, Vector2(168,72))
+	c.players[0].sliding = false
+	p.push_snapshot(c, 10.2)
+	check(p.sample(10.2).sliding[0], "delayed sample still glides toward dry-floor endpoint")
+	check(not p.sample(10.25).sliding[0], "slide pose ends at displayed dry-floor endpoint")
+	check(not p.sample(10.8).sliding[0], "stall at rest cannot manufacture slide movement")
+	var dead := snapshot(4, 1.25, Vector2(168,72))
+	dead.players[0].alive = false
+	dead.players[0].sliding = true
+	p.push_snapshot(dead, 10.25)
+	check(not p.sample(10.25).sliding[0], "elimination clears sampled slide immediately")
+
+
+func test_active_slide_stall_and_reset() -> void:
+	var p = Presentation.new()
+	var a := snapshot(1, 1.0, Vector2(130,72), Vector2(168,72))
+	a.players[0].sliding = true
+	p.push_snapshot(a, 10.0)
+	var stalled: Dictionary = p.sample(10.7)
+	check(stalled.positions[0] == Vector2(130,72) and stalled.sliding[0], "mid-slide network stall holds matching received pose without moving")
+	p.reset()
+	check(p.sample(10.8).is_empty(), "room reset discards active slide presentation")
+	p.push_snapshot(a, 10.9)
+	var b := snapshot(2, 1.05, Vector2(130,72))
+	b.board[1][2] = 1
+	b.players[0].sliding = false
+	p.push_snapshot(b, 10.95)
+	check(not p.sample(10.95).sliding[0], "board-cancelled slide drops buffered pose immediately")
+	p.push_snapshot(snapshot(1, 0.0, Vector2(72,72), Vector2.ZERO, 2), 11.0)
+	check(not p.sample(11.0).sliding[0], "new round clears previous mid-slide pose")

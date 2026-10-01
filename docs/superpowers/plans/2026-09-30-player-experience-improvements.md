@@ -1,6 +1,6 @@
 # Player Experience Improvements Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task when execution is requested. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task when execution is requested. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make online play respond predictably, explain the game before a round, communicate important events, help friends connect without developer instructions, and support up to ten recognizable duck characters.
 
@@ -10,7 +10,7 @@
 
 **Spec:** The scope and proposed behavior in [Design decisions](#design-decisions), together with the existing [game rules](../specs/qack-blast-game-design.md), [online rooms](../specs/2026-09-28-online-rooms-design.md), [results flow](../specs/2026-09-29-in-room-results-design.md), and [map identities](../specs/2026-09-29-map-identities-and-sudden-death-design.md). Current code and README support 2–6 players; older documents that say 2–4 do not reduce that support.
 
-**Status:** Planning deliverable requested on September 30, 2026. Scope now includes recommendations **1–5**, the user's request for **up to 10 online players**, and the selected visual direction of **ten duck looks with different colors and costumes**. The user has supplied item 4 feedback: Frost ice and sliding need clearer visual distinction; Nightfall's current clear range feels right, with a longer gradual fade into darkness requested outside it. See M6 below and the [character design and ten-player expansion plan](2026-09-30-character-design-and-ten-players.md). Technical choices and tuning values are proposed implementation defaults, not claims that they have already been implemented or playtested.
+**Status — October 1, 2026:** Tasks 1–9 are implemented and reviewed; Task 10 technical validation and documentation are complete, while human acceptance remains open. All 13 headless scripts and the final Web export passed. Browser lifecycle coverage, a ten-minute automated soak, 36 causal presented-pose trials, and six valid-map 50-bomb cascades are recorded in the [acceptance record](../../playtests/2026-10-01-player-experience-acceptance.md). Nightfall misses the proposed 60 fps Web target; an artificial all-open stress fixture exceeds the queued transport buffer. Changes after the recorded commits remain uncommitted by instruction. Approved tuning now includes roughly doubled Frost ice/Lily water coverage and Lily starting speed at 50% of normal.
 
 **Baseline checked on September 30, 2026:** All six existing headless scripts passed (`arena`, `connection`, `network`, `online`, `results`, `rooms`), with localhost access enabled for network verification. Document links and task coverage were checked. This validates the current baseline; the new regression cases and human playtest remain future implementation work.
 
@@ -28,7 +28,7 @@
 
 Milestone numbers group related outcomes; they are not the task execution order. Use the cross-document execution order below. M4's connection work is independently testable and is scheduled early to support later multiplayer checks.
 
-**Item 4 feedback received:** Frost changes should make the slippery surface recognizable before entry and the forced slide recognizable during movement. Nightfall should remain suspenseful, keep its current fully clear range, and reveal progressively fainter detail outside that region before reaching full darkness. The user did not request faster/longer slides, a larger fully lit circle, or unrestricted visibility across the map. M6 owns these changes; unrelated map balance remains outside this plan.
+**Item 4 feedback received:** Frost changes should make the slippery surface recognizable before entry and the forced slide recognizable during movement. Nightfall should remain suspenseful, keep its current fully clear range, and reveal progressively fainter detail outside that region before reaching full darkness. The user did not request faster/longer slides, a larger fully lit circle, or unrestricted visibility across the map. M6 owns these changes. **Approved later amendment:** roughly double Frost ice and Lily water coverage, preserve safe spawn exits, and reduce Lily starting speed to 50% of normal with its existing water factor and proportional Speed upgrades. Other balance changes remain outside this plan.
 
 ## Execution order across both plans
 
@@ -75,7 +75,7 @@ This is the authoritative execution order for the combined scope. **Main N** ref
 
 - Expand online capacity from the current 2–6 to **2–10** through M5, keeping existing 2–6 behavior as regression coverage. Preserve host-only map/start controls, cumulative Wins/Kills, replay in the same room, and local two-player controls.
 - The server owns movement legality, bomb placement, damage, score attribution, countdown, and round outcome. Client smoothing never changes rule state or resolves collisions.
-- Preserve tile-center movement, bomb fuse **2.5 seconds**, flame lifetime **0.5 seconds**, and existing map-specific rules. No gameplay tuning is bundled into presentation work; M5 explicitly adds larger-board geometry and safe spawns for 7–10 players.
+- Preserve tile-center movement, bomb fuse **2.5 seconds**, flame lifetime **0.5 seconds**, and existing map-specific rules. The later approved Frost/Lily coverage and Lily 50% starting-speed amendment is the explicit tuning exception; M5 adds larger-board geometry and safe spawns for 7–10 players.
 - Preserve Frost's existing one-extra-tile slide distance, speed, trigger, and blockers. Preserve Nightfall's starting `vision = 1`, current fully clear radius, and Sight pickup increment. M6 intentionally extends partial visibility through a longer outer fade; this is a visibility change even though the clear radius stays the same.
 - Retain the **30-second** disconnected-avatar grace period during active play. Rejoining remains a new participant; it does not recover the previous avatar or score record.
 - Preserve the **960 × 704** viewport, duck art direction, keyboard controls, and Godot Web export. M5 adds ten costume/color identities, display-scaled boards, and compact HUD rows inside that viewport; costumes do not change gameplay stats.
@@ -189,133 +189,160 @@ For each behavioral task: add the named regression cases, run them and confirm t
 
 ### Task 1: Direction intent and input edges — M1
 
+**Task status:** Implemented/reviewed; deterministic input and focus-loss checks pass. The manual local/Web control-feel comparison remains unverified.
+
 **Files:** Create `scripts/player_input.gd` and `tests/input_test.gd`; modify `scripts/online_app.gd`, `scripts/room_server.gd`, `scripts/room_registry.gd`, `tests/rooms_test.gd`, and `tests/network_test.gd`.
 
 **Interfaces:** `PlayerInput.handle_key(keycode: int, pressed: bool, echo: bool) -> void`, `direction() -> Vector2`, `consume_move_press() -> Vector2`, `consume_bomb_press() -> bool`, `reset() -> void`. Extend `RoomRegistry.set_input(peer_id: int, direction: Vector2, plant: bool, move_press: Vector2 = Vector2.ZERO) -> bool`; old callers remain valid.
 
-- [ ] Add `test_latest_held_key_wins`, `test_alias_release_keeps_other_key`, `test_repeat_does_not_reorder`, `test_bomb_press_is_consumed_once`, and `test_focus_loss_resets_input` in `tests/input_test.gd`.
-- [ ] Add registry/network cases for invalid/diagonal `move_press`, press+release before one server tick producing exactly one step from rest, no extra queued step while already moving, and neutral input/expiry stopping continued movement.
-- [ ] Run the input, room, and network scripts; confirm new cases fail for the missing behavior.
-- [ ] Implement the helper and wire key changes to immediate input sends plus the existing 30 Hz heartbeat. Do not let lobby text entry produce gameplay commands. Pass validated press intent into the existing rules at the next tick.
-- [ ] Rerun those scripts and manually compare keyboard turns with local play. Check pressing/releasing keys while typing a nickname and switching browser focus.
-- [ ] Commit: `fix(input): honor latest direction and preserve input edges`.
+- [x] Add `test_latest_held_key_wins`, `test_alias_release_keeps_other_key`, `test_repeat_does_not_reorder`, `test_bomb_press_is_consumed_once`, and `test_focus_loss_resets_input` in `tests/input_test.gd`.
+- [x] Add registry/network cases for invalid/diagonal `move_press`, press+release before one server tick producing exactly one step from rest, no extra queued step while already moving, and neutral input/expiry stopping continued movement.
+- [x] Run the input, room, and network scripts; confirm new cases fail for the missing behavior.
+- [x] Implement the helper and wire key changes to immediate input sends plus the existing 30 Hz heartbeat. Do not let lobby text entry produce gameplay commands. Pass validated press intent into the existing rules at the next tick.
+- [x] Rerun input, room, and network scripts; deterministic key/focus regressions pass.
+- [ ] Manually compare keyboard turns with local play, nickname typing, and browser focus switching.
+- [x] Commit: `fix(input): honor latest direction and preserve input edges`.
 
 ### Task 2: Smooth authoritative online presentation — M1
+
+**Task status:** Implemented/reviewed; interpolation regressions and 0/100/150 ms RTT/jitter presented-pose trials pass. Complete recorded visual motion review (turns/kicks/death) remains open.
 
 **Files:** Create `scripts/arena_presentation.gd` and `tests/presentation_test.gd`; modify `scripts/arena.gd`, `scripts/online_app.gd`, `scripts/room_registry.gd`, `scripts/room_server.gd`, `tests/rooms_test.gd`, and `tests/online_test.gd`.
 
 **Interfaces:** `ArenaPresentation.reset() -> void`, `push_snapshot(snapshot: Dictionary, received_at: float) -> void`, `sample(now: float) -> Dictionary`. `sample` returns display positions, facing, and walk phase for the matching round; it does not modify `arena.game`. Add `round_id` to room/game snapshots, `snapshot_seq` to game snapshots, and JSON-safe player `move_target` values (`[x, y]`, with `[0, 0]` meaning no target).
 
-- [ ] Add deterministic `test_interpolation_between_samples`, `test_turn_uses_tile_center`, `test_duplicate_sample_does_not_restart_walk`, `test_stall_holds_position`, `test_round_change_resets_samples`, and `test_death_or_board_change_invalidates_motion`.
-- [ ] Add snapshot round-trip tests and an online assertion that displaying an interpolated position leaves authoritative position/board unchanged. Verify the Nightfall spotlight follows the displayed duck using the current curve and its original fully clear radius. Main 9 later reruns this check with the M6 curve; Main 2 does not require that future helper.
-- [ ] Run presentation, room, and online scripts; confirm missing interface/behavior failures.
-- [ ] Implement the 50 ms initial buffer and 250 ms reset boundary. Increment round identity when preparing each new round, advance snapshot sequence centrally, reject stale sequences, and clear history on leave/disconnect. Remove the per-snapshot walk-phase reset.
-- [ ] Rerun affected tests. Record movement at normal frame rate under 0, 100, and 150 ms simulated RTT plus jitter. Inspect turns, kicks, death, and rematch; do not claim interpolation eliminates input latency.
-- [ ] Commit: `feat(online): smooth movement from authoritative snapshots`.
+- [x] Add deterministic `test_interpolation_between_samples`, `test_turn_uses_tile_center`, `test_duplicate_sample_does_not_restart_walk`, `test_stall_holds_position`, `test_round_change_resets_samples`, and `test_death_or_board_change_invalidates_motion`.
+- [x] Add snapshot round-trip tests and an online assertion that displaying an interpolated position leaves authoritative position/board unchanged. Verify the Nightfall spotlight follows the displayed duck using the current curve and its original fully clear radius. Main 9 later reruns this check with the M6 curve; Main 2 does not require that future helper.
+- [x] Run presentation, room, and online scripts; confirm missing interface/behavior failures.
+- [x] Implement the 50 ms initial buffer and 250 ms reset boundary. Increment round identity when preparing each new round, advance snapshot sequence centrally, reject stale sequences, and clear history on leave/disconnect. Remove the per-snapshot walk-phase reset.
+- [x] Rerun affected tests and record causal presented-pose onset under 0/100/150 ms RTT and jitter in the bounded headless harness.
+- [ ] Complete the recorded normal-frame-rate visual motion review of turns, kicks, death, and rematch; interpolation does not eliminate input latency.
+- [x] Commit: `feat(online): smooth movement from authoritative snapshots`.
 
 ### Task 3: Map explanation and player identity — M2
+
+**Task status:** Implemented/reviewed; map picker, YOU/spectator markers, layout and preview checks pass.
 
 **Files:** Create `scripts/map_catalog.gd`, `scripts/map_picker.gd`, and `tests/map_picker_test.gd`; modify `scripts/online_app.gd`, `scripts/results_ui.gd`, `scripts/arena.gd`, `tests/online_test.gd`, and `tests/results_test.gd`.
 
 **Interfaces:** `MapCatalog.describe(mode: String) -> Dictionary` returns `name`, `terrain_text`, `pickup_text`, `hazard_text`, and representative preview data. `MapPicker.present(selected_mode: String, can_select: bool) -> void` and `signal map_selected(mode: String)`; the app sends the existing map command.
 
-- [ ] Add coverage for all five map entries, host-only selection, guest inspection without commands, authoritative selection updates after rejection, and identical picker behavior from lobby/results.
-- [ ] Add `test_online_hides_local_next_map`, `test_local_player_marker_follows_person_slot`, and `test_spectator_has_no_player_marker` to online checks.
-- [ ] Run map-picker, online, and results scripts; confirm missing behavior fails.
-- [ ] Implement catalog/picker and marker integration. Keep the local scene's M/R next-map behavior. Show current mechanics accurately, including Frost sliding/kick and Nightfall reshuffles, without changing terrain or vision values.
-- [ ] Rerun affected checks and inspect waiting/results/arena at 960 × 704 with six players and long nicknames. Verify previews do not mutate map generation or imply an exact Random board.
-- [ ] Commit: `feat(lobby): explain maps and identify the local duck`.
+- [x] Add coverage for all five map entries, host-only selection, guest inspection without commands, authoritative selection updates after rejection, and identical picker behavior from lobby/results.
+- [x] Add `test_online_hides_local_next_map`, `test_local_player_marker_follows_person_slot`, and `test_spectator_has_no_player_marker` to online checks.
+- [x] Run map-picker, online, and results scripts; confirm missing behavior fails.
+- [x] Implement catalog/picker and marker integration. Keep the local scene's M/R next-map behavior. Show current mechanics accurately, including Frost sliding/kick and Nightfall reshuffles, without changing terrain or vision values.
+- [x] Rerun affected checks and inspect waiting/results/arena at 960 × 704 with six players and long nicknames. Verify previews do not mutate map generation or imply an exact Random board.
+- [x] Commit: `feat(lobby): explain maps and identify the local duck`.
 
 ### Task 4: Shared countdown and lifecycle — M2
+
+**Task status:** Implemented/reviewed; countdown/lifecycle tests and multi-client Web flow pass.
 
 **Files:** Modify `scripts/room_registry.gd`, `scripts/room_server.gd`, `scripts/online_app.gd`, `scripts/arena.gd`, `tests/rooms_test.gd`, `tests/network_test.gd`, `tests/online_test.gd`, and `tests/results_test.gd`.
 
 **Interfaces:** Preserve `start_round(peer_id: int) -> bool`, but enter `phase = "countdown"` with `countdown_remaining = 3.0`. `tick(delta: float)` owns the transition. Include `countdown_remaining` and matching `round_id` in room views. `set_input` accepts only `playing`.
 
-- [ ] Add `test_countdown_freezes_game_clock`, `test_countdown_transitions_once`, `test_countdown_rejects_start_map_and_input`, `test_lineup_departure_cancels_countdown`, `test_late_join_spectates`, and `test_held_bomb_does_not_fire_at_go`.
-- [ ] Update existing room/network/UI fixtures that assume Start immediately enters playing: assert countdown explicitly, then advance the authoritative clock. Cover first start and rematch, host transfer, empty-room deletion, retained scores, and fresh lineup after cancellation.
-- [ ] Run affected tests and confirm lifecycle expectations fail before implementation.
-- [ ] Implement countdown/cancellation and a visible 3–2–1–GO overlay. Match room/game round IDs before showing the board; display a preparing state rather than the prior round's arena. Use only the time left after countdown expiry for gameplay when one large tick crosses GO.
-- [ ] Rerun checks and verify two browser clients observe one start, no movement/bombs before GO, and no stale bomb press after results. Confirm active-play disconnect grace remains 30 seconds.
-- [ ] Commit: `feat(rooms): synchronize round start countdown`.
+- [x] Add `test_countdown_freezes_game_clock`, `test_countdown_transitions_once`, `test_countdown_rejects_start_map_and_input`, `test_lineup_departure_cancels_countdown`, `test_late_join_spectates`, and `test_held_bomb_does_not_fire_at_go`.
+- [x] Update existing room/network/UI fixtures that assume Start immediately enters playing: assert countdown explicitly, then advance the authoritative clock. Cover first start and rematch, host transfer, empty-room deletion, retained scores, and fresh lineup after cancellation.
+- [x] Run affected tests and confirm lifecycle expectations fail before implementation.
+- [x] Implement countdown/cancellation and a visible 3–2–1–GO overlay. Match room/game round IDs before showing the board; display a preparing state rather than the prior round's arena. Use only the time left after countdown expiry for gameplay when one large tick crosses GO.
+- [x] Rerun checks and verify two browser clients observe one start, no movement/bombs before GO, and no stale bomb press after results. Confirm active-play disconnect grace remains 30 seconds.
+- [x] Commit: `feat(rooms): synchronize round start countdown`.
 
 ### Task 5: Reliable gameplay event and cause records — M3
+
+**Task status:** Implemented/reviewed; event/cause/scoring regressions pass. Event work is included in f881a6f rather than the originally proposed commit title.
 
 **Files:** Modify `scripts/arena_game.gd`, `scripts/room_registry.gd`, `scripts/room_server.gd`, `scripts/room_client.gd`, `tests/arena_test.gd`, `tests/rooms_test.gd`, and `tests/network_test.gd`.
 
 **Interfaces:** `ArenaGame.take_events() -> Array`; events carry `event_id`, `kind`, `elapsed`, and the relevant payload. `RoomRegistry.take_room_events(room: Dictionary) -> Array` drains the dispatch batch. `RoomClient` emits `events_received(round_id: int, events: Array)`. Room/game views carry `event_cursor`; player snapshots retain `elimination_cause`. Wire message: `{ "type": "events", "round_id": <int>, "events": [...] }`. Tile/vector values are JSON arrays.
 
-- [ ] Add exact-once emission cases for placement, explosion chains, actual pickup grants/capped pickups, elimination, and round end. Pin self-kill, nearest-blast credit, equal-distance ambiguity, every neutral hazard, and disconnect expiry to the existing score expectations.
-- [ ] Add round-trip cases for ordered event IDs, batch draining, final events when the phase becomes results, late-join cursor initialization, and per-round counter reset. Verify no indefinitely growing event history.
-- [ ] Run arena, room, and network scripts and confirm the absent event contract fails.
-- [ ] Emit events at existing rule-resolution points. Let the registry record disconnect elimination through a focused engine method so causes/events stay consistent. Transport drained batches once per server tick; serialize causes without exposing mutable rule dictionaries to UI consumers.
-- [ ] Rerun all scoring/draw/map regressions and the new transport cases. Require unchanged Wins/Kills and round outcomes for existing scenarios.
-- [ ] Commit: `feat(arena): expose gameplay events and elimination causes`.
+- [x] Add exact-once emission cases for placement, explosion chains, actual pickup grants/capped pickups, elimination, and round end. Pin self-kill, nearest-blast credit, equal-distance ambiguity, every neutral hazard, and disconnect expiry to the existing score expectations.
+- [x] Add round-trip cases for ordered event IDs, batch draining, final events when the phase becomes results, late-join cursor initialization, and per-round counter reset. Verify no indefinitely growing event history.
+- [x] Run arena, room, and network scripts and confirm the absent event contract fails.
+- [x] Emit events at existing rule-resolution points. Let the registry record disconnect elimination through a focused engine method so causes/events stay consistent. Transport drained batches once per server tick; serialize causes without exposing mutable rule dictionaries to UI consumers.
+- [x] Rerun all scoring/draw/map regressions and the new transport cases. Require unchanged Wins/Kills and round outcomes for existing scenarios.
+- [x] Commit: `feat(arena): expose gameplay events and elimination causes`.
 
 ### Task 6: Sound and visual feedback — M3
+
+**Task status:** Implemented/reviewed; automated feedback/result-race/mute/visibility checks pass. Subjective local/Web audio listening remains open; no additional commit authorized.
 
 **Files:** Create `scripts/game_feedback.gd`, `tests/feedback_test.gd`, sound files under `assets/audio/`, and `assets/audio/README.md`; modify `scripts/arena.gd`, `scripts/online_app.gd`, `scripts/results_ui.gd`, `tests/online_test.gd`, and `tests/results_test.gd`.
 
 **Interfaces:** `GameFeedback.reset(round_id: int, event_cursor: int) -> void`, `consume_events(round_id: int, events: Array, context: Dictionary) -> void`, `set_muted(value: bool) -> void`. Context supplies viewer slot, current map, visibility, and player names; effects never grant an upgrade, change alive state, or award a score. Local arena drains the same engine event API.
 
-- [ ] Add `test_event_is_presented_once`, `test_old_round_event_is_ignored`, `test_late_join_does_not_replay_history`, `test_new_round_events_wait_for_matching_state`, `test_muted_events_keep_visual_feedback`, and `test_night_hidden_event_has_no_positional_cue`.
-- [ ] Add result-race coverage: final personal elimination cause remains visible if the results phase arrives before/after the final game/event message. Cover win, loss, draw, and spectators without assigning a false personal outcome.
-- [ ] Run feedback, online, and results scripts; confirm missing event consumption behavior fails.
-- [ ] Implement sound/effect playback, bounded deduplication/queued events, the visible mute control, personal elimination text, upgrade notices, and stronger final-0.6-second bomb urgency. Clear transient effects on room changes. Use current event/cause data rather than guessing from missing snapshot entities.
-- [ ] Rerun affected checks. Inspect/listen in local and Web builds after the first user gesture, with mute on/off, overlapping explosions, hidden Nightfall events, and immediate round end. Cap overlapping voices to avoid clipping; warnings and controls must remain readable.
-- [ ] Commit: `feat(feedback): add sound and readable gameplay events`.
+- [x] Add `test_event_is_presented_once`, `test_old_round_event_is_ignored`, `test_late_join_does_not_replay_history`, `test_new_round_events_wait_for_matching_state`, `test_muted_events_keep_visual_feedback`, and `test_night_hidden_event_has_no_positional_cue`.
+- [x] Add result-race coverage: final personal elimination cause remains visible if the results phase arrives before/after the final game/event message. Cover win, loss, draw, and spectators without assigning a false personal outcome.
+- [x] Run feedback, online, and results scripts; confirm missing event consumption behavior fails.
+- [x] Implement sound/effect playback, bounded deduplication/queued events, the visible mute control, personal elimination text, upgrade notices, and stronger final-0.6-second bomb urgency. Clear transient effects on room changes. Use current event/cause data rather than guessing from missing snapshot entities.
+- [x] Rerun feedback, online, and results checks; exact-once, mute and visibility regressions pass.
+- [ ] Inspect/listen in local and Web builds after the first user gesture, with mute on/off, overlapping explosions, hidden Nightfall events, and immediate round end. Cap overlapping voices to avoid clipping; warnings and controls must remain readable.
+- [ ] Commit: `feat(feedback): add sound and readable gameplay events`. **Deferred by instruction: leave the working tree uncommitted; not an implementation blocker.**
 
 ### Task 7: Connection progress, retry, and recovery — M4
+
+**Task status:** Implemented/reviewed; deterministic recovery and loopback checks pass. Complete manual slow-public-connection/server-restart matrix remains unverified.
 
 **Files:** Create `scripts/connection_flow.gd`; modify `scripts/room_client.gd`, `scripts/online_app.gd`, `scripts/lobby_ui.gd`, `tests/connection_test.gd`, and `tests/online_test.gd`.
 
 **Interfaces:** `ConnectionFlow.begin(request: Dictionary) -> int` returns the attempt ID; `advance(delta: float) -> Array` returns scheduled actions; `on_transport_result(attempt_id: int, connected: bool) -> Array`, `on_room_result(attempt_id: int, message: Dictionary) -> Array`, and `cancel() -> void`. Actions are connect, close, send request, or display state; the helper owns timing/attempt identity, while `RoomClient` owns sockets. The flow exposes the current phase/error category and preserves retry input independently of `pending_request`.
 
-- [ ] Replace the existing one-second real-time failure check with deterministic cases for 8-second waking text, 12-second transport attempts, 1/2/4/8-second backoff, 90-second total deadline, and 15-second room-response timeout.
-- [ ] Add `test_repeated_click_sends_one_request`, `test_cancel_ignores_old_attempt`, `test_sent_request_is_not_auto_replayed`, `test_room_rejection_does_not_retry_transport`, and `test_rejoin_preserves_code_without_resuming_identity`. Retain an actual unreachable-loopback smoke check separately.
-- [ ] Run connection and online scripts; confirm the new state/recovery checks fail.
-- [ ] Implement the controller and clear busy/failed/retry/cancel UI. Bind callback handling to the current transport generation. Ensure closing a timed-out socket cannot overwrite a newer attempt, and an accepted command is cleared exactly once.
-- [ ] Rerun checks. Manually exercise reachable localhost, a closed port, a slow public connection, invalid/full room, cancellation, and server restart. Verify production copy gives the player an action and local-only server hints are limited to loopback configurations.
-- [ ] Commit: `feat(connection): add clear progress and bounded recovery`.
+- [x] Replace the existing one-second real-time failure check with deterministic cases for 8-second waking text, 12-second transport attempts, 1/2/4/8-second backoff, 90-second total deadline, and 15-second room-response timeout.
+- [x] Add `test_repeated_click_sends_one_request`, `test_cancel_ignores_old_attempt`, `test_sent_request_is_not_auto_replayed`, `test_room_rejection_does_not_retry_transport`, and `test_rejoin_preserves_code_without_resuming_identity`. Retain an actual unreachable-loopback smoke check separately.
+- [x] Run connection and online scripts; confirm the new state/recovery checks fail.
+- [x] Implement the controller and clear busy/failed/retry/cancel UI. Bind callback handling to the current transport generation. Ensure closing a timed-out socket cannot overwrite a newer attempt, and an accepted command is cleared exactly once.
+- [x] Rerun connection and online checks, including deterministic retry/cancel/rejection and loopback smoke coverage.
+- [ ] Complete the manual matrix: reachable localhost, a closed port, a slow public connection, invalid/full room, cancellation, and server restart. Verify production copy gives the player an action and local-only server hints are limited to loopback configurations.
+- [x] Commit: `feat(connection): add clear progress and bounded recovery`.
 
 ### Task 8: Distinct ice surface and slide feedback — M6
+
+**Task status:** Implemented/reviewed; authoritative slide state, sampled pose, patterned ice and timing regressions pass. Static native/Web ice views checked; the full visual glide/overlap matrix and human comprehension remain open.
 
 **Files:** Modify `scripts/arena_game.gd`, `scripts/room_registry.gd`, `scripts/online_app.gd`, `scripts/arena_presentation.gd`, `scripts/arena.gd`, `scripts/arena_board.gd` from Expansion A, and `scripts/game_feedback.gd`; test in `tests/arena_test.gd`, `tests/rooms_test.gd`, `tests/presentation_test.gd`, `tests/online_test.gd`, and `tests/feedback_test.gd`.
 
 **Interfaces:** `ArenaGame.is_sliding(player_index: int) -> bool`; snapshot player field `sliding: bool`. `ArenaPresentation.sample(now)` returns the slide flag for the sampled movement segment. The renderer consumes it for pose/trail; it never changes movement targets.
 
-- [ ] Add `test_slide_state_covers_only_forced_segment`, `test_blocked_ice_does_not_report_sliding`, `test_slide_state_clears_on_death_and_new_round`, and `test_slide_snapshot_round_trip`. Assert unchanged one-extra-tile distance and movement timing, including a slide ending on ordinary floor.
-- [ ] Add `test_slide_pose_matches_sampled_position` with delayed snapshots, repeated samples, and stalled input; add a once-per-slide sound check when audio is implemented. Ensure walking over ordinary floor and merely holding a direction do not produce slide trails.
-- [ ] Run the affected test scripts; confirm missing state/query/presentation behavior fails before implementation.
-- [ ] Implement the state query and snapshot transport, patterned ice drawing, gliding pose, and short trail. Use the shared ten-look duck renderer and original movement-presentation buffer; do not add a second simulation or speed multiplier.
-- [ ] Rerun affected tests. Inspect stationary ice, ordinary walking, released-key sliding, blocked sliding, bomb kicking, elimination, and six/ten-player overlap at 32/38/44/52 px display tiles. Verify the material is identifiable before entry and the extra movement is recognizably a glide without audio.
-- [ ] Commit: `feat(frost): distinguish slippery tiles and sliding movement`.
+- [x] Add `test_slide_state_covers_only_forced_segment`, `test_blocked_ice_does_not_report_sliding`, `test_slide_state_clears_on_death_and_new_round`, and `test_slide_snapshot_round_trip`. Assert unchanged one-extra-tile distance and movement timing, including a slide ending on ordinary floor.
+- [x] Add `test_slide_pose_matches_sampled_position` with delayed snapshots, repeated samples, and stalled input; add a once-per-slide sound check when audio is implemented. Ensure walking over ordinary floor and merely holding a direction do not produce slide trails.
+- [x] Run the affected test scripts; confirm missing state/query/presentation behavior fails before implementation.
+- [x] Implement the state query and snapshot transport, patterned ice drawing, gliding pose, and short trail. Use the shared ten-look duck renderer and original movement-presentation buffer; do not add a second simulation or speed multiplier.
+- [x] Rerun affected slide/presentation tests; inspect static native/Web ice at supported player profiles.
+- [ ] Complete the visual motion matrix: stationary ice, ordinary walking, released-key sliding, blocked sliding, bomb kicking, elimination, and six/ten-player overlap at 32/38/44/52 px display tiles. Verify the material is identifiable before entry and the extra movement is recognizably a glide without audio.
+- [ ] Commit: `feat(frost): distinguish slippery tiles and sliding movement`. **Deferred by instruction: leave the working tree uncommitted; not an implementation blocker.**
 
 ### Task 9: Extend Nightfall's gradual outer fade — M6
+
+**Task status:** Implemented/reviewed; shared fade/audio policy and clear-radius regressions pass. Native/Web still views checked; the complete moving/upgrade/overlap visual matrix remains open.
 
 **Files:** Create `scripts/night_visibility.gd` and its UID; modify `scripts/arena.gd`, `scripts/arena_board.gd` from Expansion A, and `scripts/game_feedback.gd`; test in `tests/arena_test.gd`, `tests/online_test.gd`, and `tests/feedback_test.gd`.
 
 **Interfaces:** `NightVisibility.darkness_at(distance: float, vision: int, cell: float) -> float` and `within_audio_reach(distance: float, vision: int, cell: float) -> bool`. Rendering and point/tile visibility queries call the same darkness function; multi-player/local composition remains a minimum over valid viewers.
 
-- [ ] Add exact tests for `vision = 1`: darkness is 0 through 1.4 tiles, 0.8 at 1.9 tiles, between 0.8 and 1 at 2.4 tiles, and 1 at/beyond 3.4 tiles. Test continuity immediately either side of 1.4/1.9/3.4, monotonicity, circular symmetry, and equivalent results for different `CELL` sizes.
-- [ ] Add `test_sight_pickup_shifts_both_regions_one_tile`, `test_outer_fade_does_not_expand_audio_reach`, and regression cases for viewer isolation, combined local light, spectators, results, and warnings over darkness. Update old second-ring/1.65-diagonal expectations intentionally because those points now lie in the faint region; retain evidence that farther points stay fully dark.
-- [ ] Run arena/online/feedback checks and confirm the newly specified falloff fails against the previous short fade.
-- [ ] Implement the shared piecewise smoothstep function with named 0.8/1.5-tile tuning constants. Keep the current fully clear radius and Sight progression. Update mask drawing and feedback gating together; avoid a second hard clipping radius that would hide objects before the gradient reaches full darkness.
-- [ ] Rerun tests and inspect still/moving spotlights, dim ducks/bombs at the outer edge, overlapping local circles, upgrades, and the 32 px display scale. Confirm gradual fading, continued suspense, no visible hard ring, no clear hidden-player marker, and unchanged bright-center size. Compare alternative outer widths only if visual review shows the proposed 1.5 tiles is too faint or too revealing.
-- [ ] Commit: `feat(nightfall): extend the dim outer visibility falloff`.
+- [x] Add exact tests for `vision = 1`: darkness is 0 through 1.4 tiles, 0.8 at 1.9 tiles, between 0.8 and 1 at 2.4 tiles, and 1 at/beyond 3.4 tiles. Test continuity immediately either side of 1.4/1.9/3.4, monotonicity, circular symmetry, and equivalent results for different `CELL` sizes.
+- [x] Add `test_sight_pickup_shifts_both_regions_one_tile`, `test_outer_fade_does_not_expand_audio_reach`, and regression cases for viewer isolation, combined local light, spectators, results, and warnings over darkness. Update old second-ring/1.65-diagonal expectations intentionally because those points now lie in the faint region; retain evidence that farther points stay fully dark.
+- [x] Run arena/online/feedback checks and confirm the newly specified falloff fails against the previous short fade.
+- [x] Implement the shared piecewise smoothstep function with named 0.8/1.5-tile tuning constants. Keep the current fully clear radius and Sight progression. Update mask drawing and feedback gating together; avoid a second hard clipping radius that would hide objects before the gradient reaches full darkness.
+- [x] Rerun arena/online/feedback checks and inspect native/Web still spotlight views.
+- [ ] Complete the visual matrix: still/moving spotlights, dim ducks/bombs at the outer edge, overlapping local circles, upgrades, and the 32 px display scale. Confirm gradual fading, continued suspense, no visible hard ring, no clear hidden-player marker, and unchanged bright-center size. Compare alternative outer widths only if visual review shows the proposed 1.5 tiles is too faint or too revealing.
+- [ ] Commit: `feat(nightfall): extend the dim outer visibility falloff`. **Deferred by instruction: leave the working tree uncommitted; not an implementation blocker.**
 
 ### Task 10: Acceptance and documentation
 
+**Task status:** Technical checks/documentation complete within the acceptance record; human rounds and overall milestone sign-off remain open. Commit deferred by instruction.
+
 **Files:** Update `README.md`; create `docs/playtests/2026-09-30-player-experience-checklist.md` when implementation reaches playtest. Record observations and actual test dates; do not pre-fill results as passed.
 
-- [ ] Update controls, map picker, countdown, sound/mute, retry/rejoin instructions, and the full test-script list in README. Document the intentional countdown amendment to the previous immediate-start flow.
-- [ ] Run every headless script using the command below; require exit code 0 from the whole loop and no assertion failures. Confirm generated UIDs accompany new scripts and that M6 preserves slide mechanics and Nightfall's clear radius while implementing the requested surface/motion/falloff changes.
-- [ ] Export the Web build with the matching templates and test create/join/countdown/play/results/replay from 2, 6, 8, and 10 clients. Verify 7/9-player boundary profiles and 11th-player rejection through M5. Record any unavailable export capability as unverified, not passed.
-- [ ] Use a local test harness/network shaper to test movement with 0/100/150 ms RTT and 0/±30 ms jitter, plus a 250+ ms stall. Apply delay to both input and snapshot directions; do not infer end-to-end latency from delayed rendering alone. Keep the harness out of production behavior.
+- [x] Update controls, map picker, countdown, sound/mute, retry/rejoin instructions, and the full test-script list in README. Document the intentional countdown amendment to the previous immediate-start flow.
+- [x] Run every headless script using the command below; require exit code 0 from the whole loop and no assertion failures. Confirm generated UIDs accompany new scripts and that M6 preserves slide mechanics and Nightfall's clear radius while implementing the requested surface/motion/falloff changes.
+- [x] Export the Web build with the matching templates and test create/join/countdown/play/results/replay from 2, 6, 8, and 10 clients. Verify 7/9-player boundary profiles and 11th-player rejection through M5. Record any unavailable export capability as unverified, not passed.
+- [x] Use a local test harness/network shaper to test movement with 0/100/150 ms RTT and 0/±30 ms jitter, plus a 250+ ms stall. Apply delay to both input and snapshot directions; do not infer end-to-end latency from delayed rendering alone. Keep the harness out of production behavior.
 - [ ] Run at least three rounds each at 2, 6, and 10 players with people. Record time to join, wrong-direction/missed-input reports, whether each person can identify their duck and map mechanic before GO, whether they understand why they died, and whether retry needs developer help. If enough humans are unavailable, distinguish technical multi-client coverage from an outstanding human playtest at that count.
 - [ ] Accept the milestone only when there are no stuck inputs/duplicate starts/duplicate sounds, the UI fits at 960 × 704, room/score rules still pass, and feedback is understandable to the participants. Record observed round length and waiting time without changing balance under this plan.
-- [ ] Include explicit M6 playtest questions: can players identify ice before stepping on it, distinguish the forced slide from walking, and see the Nightfall outer fade while still finding the map suspenseful? Record whether the brighter center feels unchanged and whether faint outer objects reveal too much.
-- [ ] Commit documentation and validation evidence: `docs(game): document player experience improvements and validation`.
+- [x] Include explicit M6 questions in the acceptance record.
+- [ ] Obtain and record answers: can players identify ice before stepping on it, distinguish the forced slide from walking, and see the Nightfall outer fade while still finding the map suspenseful? Record whether the brighter center feels unchanged and whether faint outer objects reveal too much.
+- [ ] Commit documentation and validation evidence: `docs(game): document player experience improvements and validation`. **Deferred by instruction: leave the working tree uncommitted; not an implementation blocker.**
 
 ## Verification commands
 

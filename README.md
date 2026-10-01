@@ -1,6 +1,6 @@
 # Qack Blast
 
-A small 2–6 player bomb battle. The main scene is now the online lobby; the original two-player keyboard scene remains available at `scenes/arena.tscn`.
+A small 2–10 player bomb battle. The main scene is now the online lobby; the original two-player keyboard scene remains available at `scenes/arena.tscn`.
 
 ## Play online on one computer
 
@@ -17,11 +17,15 @@ It listens on `127.0.0.1:9080` by default. To change this, add `-- --port=9080 -
 python3 -m http.server 8765 --bind 127.0.0.1 --directory build/web
 ```
 
-Open `http://127.0.0.1:8765` in separate browser windows. One player enters a nickname and creates a room; the waiting lobby shows the six-character code with a copy button, and the others enter it to join. The host chooses Classic, Random, Lily Pond, Frost Garden, or Nightfall and starts the round once at least two players have joined. Each window controls its own duck with **WASD** or **Arrow keys** and plants a bomb with **Space** or **Enter**. After a round, everyone sees a results screen with the leaderboard and a copyable room code. The host can change the map or select **Play Again** there; all players stay in the same room.
+Open `http://127.0.0.1:8765` in separate browser windows. One player enters a nickname and creates a room; the waiting lobby shows the six-character code with a copy button, and the others enter it to join. Use **Explore Maps** to read each map's terrain, pickups and hazards. The host chooses Classic, Random, Lily Pond, Frost Garden, or Nightfall and starts the round once at least two players have joined. Every client sees a shared three-second countdown before GO; movement and bombs stay disabled until GO. The YOU marker identifies your duck. Each window controls its own duck with **WASD** or **Arrow keys** and plants a bomb with **Space** or **Enter**. After a round, everyone sees a results screen with the leaderboard and a copyable room code. The host can change the map or select **Play Again** there; all players stay in the same room.
 
-Each map has its own effect and crate pickup. Classic keeps the bomb-capacity and blast-range upgrades. Random rerolls permanent walls each round and can drop a Mystery item that grants one of those upgrades. Lily Pond has shallow water that slows movement and a Speed item that boosts movement everywhere. Frost Garden has ice that slides ducks one extra tile and a Bomb Kick item: walk into a bomb to send it toward the next wall, crate, bomb, or arena edge. Nightfall has a soft spotlight around each duck and a Sight item that widens it. Its permanent walls reshuffle at one and two minutes, avoiding ducks, bombs, and pickups.
+Sound cues mark bomb placement, explosions, pickups, elimination and round results. Use **Mute** to switch sound off or on; the choice is saved on that device. Browser sound becomes available after interacting with the game.
 
-The server owns the game state and sends snapshots to every client. Room codes and scores live only in server memory. A disconnected player's avatar stays in the arena for 30 seconds before it is eliminated; host rights pass to the longest-connected remaining player. New players joining during a round wait for the next one. This local setup uses plain `ws://`; hosting it on an HTTPS site needs a publicly reachable `wss://` server configured in the Web build or passed through `?server=`.
+Connecting shows progress and offers **Cancel**. Temporary failures use bounded retries, then offer **Retry**. After losing a room connection, **Rejoin** keeps the code but creates a new participant; your old duck and score are not recovered.
+
+Each map has its own effect and crate pickup. Classic keeps the bomb-capacity and blast-range upgrades. Random rerolls permanent walls each round and can drop a Mystery item that grants one of those upgrades. Lily Pond starts ducks at half normal speed (94 px/s); its broad shallow-water patches apply a further 20% slowdown (75.2 px/s). Speed items add 25% of the Lily base speed each, capped at a 50% bonus, on dry ground and water. Frost Garden has broad ice patches that slide ducks one extra tile and a Bomb Kick item: walk into a bomb to send it toward the next wall, crate, bomb, or arena edge. Nightfall has a soft spotlight around each duck and a Sight item that widens it. Its permanent walls reshuffle at one and two minutes, avoiding ducks, bombs, and pickups.
+
+The server owns the game state and sends snapshots to every client. Room codes and scores live only in server memory. A disconnected player's avatar stays in the arena for 30 seconds before it is eliminated; host rights pass to the longest-connected remaining player. Rooms admit up to ten connected participants, including spectators; offline history does not consume a slot. New players joining during a round wait for the next one. This local setup uses plain `ws://`; hosting it on an HTTPS site needs a publicly reachable `wss://` server configured in the Web build or passed through `?server=`.
 
 ## Deploy online for free
 
@@ -37,17 +41,20 @@ The free server sleeps after 15 minutes without inbound traffic. Its first conne
 
 Open `scenes/arena.tscn` and press **F6**. Player 1 uses **WASD** and **Space**; player 2 uses **Arrow keys** and **Enter**. **M** cycles through the five maps for the next round, and **R** starts it. In local Nightfall, both players' visible areas are combined. If Godot's floating Game window does not receive keys, set its Interaction mode to **Input**.
 
-The round rules support 2–6 players, Wins/Kills, chain explosions, and pickups. Rounds with 2–3 players use a 13×11 map; rounds with 4–6 use a 15×13 map. Sudden death begins with a warning at 3:00, then strikes at 3:05 and every 15 seconds while multiple ducks survive. Classic fires escalating row-and-column danger bombs; Random bursts increasingly many marked tiles; Lily Pond floods inward; Frost Garden strikes rows with blizzards; Nightfall closes inward with permanent walls. The round continues until one duck survives. If the last ducks die together, it ends in a draw.
+The round rules support 2–10 players, Wins/Kills, chain explosions, and pickups. Rounds with 2–3 players use a 13×11 map; rounds with 4–6 use a 15×13 map. Rounds with 7–8 use a 17×15 map; rounds with 9–10 use a 19×17 map. Sudden death begins with a warning at 3:00, then strikes at 3:05 and every 15 seconds while multiple ducks survive. Classic fires escalating row-and-column danger bombs; Random bursts increasingly many marked tiles; Lily Pond floods inward; Frost Garden strikes rows with blizzards; Nightfall closes inward with permanent walls. The round continues until one duck survives. If the last ducks die together, it ends in a draw.
 
 ## Checks
 
 ```sh
-/Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script tests/arena_test.gd
-/Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script tests/rooms_test.gd
-/Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script tests/network_test.gd
-/Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script tests/online_test.gd
-/Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script tests/results_test.gd
-/Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script tests/connection_test.gd
+test_exit_status=0
+for t in tests/*_test.gd; do
+  /Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script "$t" || test_exit_status=1
+done
+exit "$test_exit_status"
 ```
 
+The test scripts are `arena`, `character`, `connection`, `feedback`, `input`, `map_picker`, `network`, `online`, `presentation`, `results`, `rooms`, `ten_network`, and `ten_player` (`tests/*_test.gd`).
+
 `scripts/arena_game.gd` owns the rules; `scripts/room_registry.gd` owns room membership and scores; `scripts/room_server.gd` validates network commands; and `scripts/online_app.gd` renders the lobby and snapshots, using the widget helpers in `scripts/lobby_ui.gd`.
+
+The [player experience acceptance record](docs/playtests/2026-10-01-player-experience-acceptance.md) records technical validation and outstanding human/performance checks.

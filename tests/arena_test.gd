@@ -1,5 +1,7 @@
 extends SceneTree
 
+const NightVisibility = preload("res://scripts/night_visibility.gd")
+
 var failures := 0
 
 
@@ -23,6 +25,15 @@ func _initialize() -> void:
 		return
 	root.add_child(arena)
 	arena.new_round()
+	arena.build_local_mute()
+	check(arena.local_mute_button != null, "local arena has mute control")
+	if arena.local_mute_button != null:
+		check(arena.local_mute_button.visible, "local mute control is visible")
+		arena.feedback.persist = false
+		var was_muted: bool = arena.feedback.muted
+		arena.local_mute_button.pressed.emit()
+		check(arena.feedback.muted != was_muted, "local mute button toggles audio")
+		arena.local_mute_button.pressed.emit()
 	var game = arena.game
 	test_display_scale_does_not_change_rules(arena)
 	test_spawn_routes(game)
@@ -38,12 +49,18 @@ func _initialize() -> void:
 	test_night_vision_pickup()
 	test_night_visibility(arena)
 	test_night_spotlight(arena)
+	test_night_curve()
+	test_sight_pickup_shifts_both_regions_one_tile()
+	test_outer_fade_does_not_expand_audio_reach(arena)
 	test_night_drops_vision()
 	test_random_mystery_and_bursts()
 	test_random_burst_chain()
 	test_map_specific_pickup_drops()
+	test_terrain_coverage_tuning()
+	test_map_movement_speed_tuning()
 	test_pond_water_speed_and_flood()
 	test_large_step_resolves_flood_before_bomb()
+	test_slide_state_covers_only_forced_segment()
 	test_frost_ice_and_bomb_kick()
 	test_frost_blizzard()
 	test_win_and_kill_persist()
@@ -742,11 +759,12 @@ func test_night_visibility(arena) -> void:
 	arena.selected_wall_mode = "night"
 	arena.new_round()
 	check(arena.visible_tile(Vector2i(2, 2)), "diagonal tile inside first ring is visible")
-	check(not arena.visible_tile(Vector2i(3, 3)), "second ring begins hidden")
+	check(arena.visible_tile(Vector2i(3, 3)), "second ring has faint detail")
+	check(not arena.visible_tile(Vector2i(5, 5)), "beyond outer fade stays hidden")
 	arena.game.players[0].vision = 2
 	check(arena.visible_tile(Vector2i(3, 3)), "vision upgrade reveals second ring")
 	arena.game.players[0].vision = 3
-	check(not arena.visible_tile(Vector2i(4, 4)), "spotlight excludes distant diagonal corners")
+	check(arena.visible_tile(Vector2i(4, 4)), "Sight extends faint diagonal detail")
 	arena.networked = true
 	arena.viewer_slot = 0
 	check(not arena.visible_tile(Vector2i(11, 9)), "online opponent region stays hidden")
@@ -773,7 +791,11 @@ func test_night_spotlight(arena) -> void:
 	var edge: Vector2 = center + Vector2(1.65 * cell, 0)
 	var edge_darkness: float = arena.vision_darkness(edge)
 	check(edge_darkness > 0.0 and edge_darkness < 1.0, "spotlight edge fades")
-	check(is_equal_approx(arena.vision_darkness(center + Vector2(1.65, 1.65) * cell), 1.0), "spotlight is circular")
+	check(is_equal_approx(arena.vision_darkness(center + Vector2(1.9, 0) * cell), 0.8), "dim anchor is 0.8")
+	check(is_equal_approx(arena.vision_darkness(center + Vector2(3.4, 0) * cell), 1.0), "outer boundary is dark")
+	check(is_equal_approx(arena.vision_darkness(center + Vector2(3.4, 3.4) * cell), 1.0), "far diagonal is dark")
+	for direction in [Vector2.RIGHT, Vector2.LEFT, Vector2.UP, Vector2.DOWN, Vector2(1, 1).normalized()]:
+		check(is_equal_approx(arena.vision_darkness(center + direction * 2.4 * cell), NightVisibility.darkness_at(2.4 * cell, 1, cell)), "circular falloff")
 	arena.game.players[0].vision = 2
 	check(is_zero_approx(arena.vision_darkness(edge)), "sight pickup widens spotlight")
 	arena.game.players[0].alive = false
@@ -882,7 +904,7 @@ func test_pond_water_speed_and_flood() -> void:
 	game.terrain[spawn.y][spawn.x] = 1
 	var start: Vector2 = game.players[0].pos
 	game.move_player(0, 0.1, Vector2.RIGHT)
-	check(is_equal_approx(game.players[0].pos.x - start.x, 15.04), "shallow water slows movement to 80 percent")
+	check(is_equal_approx(game.players[0].pos.x - start.x, 7.52), "shallow water slows movement to 80 percent")
 	game.players[0].pos = start
 	game.move_targets[0] = Vector2.ZERO
 	game.pickups[spawn] = 4
@@ -1165,11 +1187,12 @@ func test_expanded_spawn_fairness() -> void:
 							exits += 1
 					check(exits >= 2, label + " two legal first moves")
 					var route := safe_spawn_escape(game, spawn)
-					check(not route.is_empty() and route.size() * game.CELL / game.SPEED < game.FUSE, label + " escape beyond initial blast before fuse")
+					var map_speed: float = 94.0 if mode == "pond" else 188.0
+					check(not route.is_empty() and route.size() * game.CELL / map_speed < game.FUSE, label + " escape beyond initial blast before fuse")
 					game.place_bomb(i)
 					var previous := spawn
 					for tile in route:
-						game.move_player(i, game.CELL / game.SPEED + 0.001, Vector2(tile - previous))
+						game.move_player(i, game.CELL / map_speed + 0.001, Vector2(tile - previous))
 						check(game.players[i].pos == game.center(tile), label + " escape uses actual movement")
 						previous = tile
 					game.update_bombs(game.FUSE)
@@ -1531,3 +1554,150 @@ func test_event_ids_reset_and_bounded() -> void:
 		game.emit_event("bomb_placed", {"tile": [1, 1], "owner": 0})
 	var events: Array = game.take_events()
 	check(events.size() == game.MAX_PENDING_EVENTS and events[-1].event_id == game.MAX_PENDING_EVENTS + 50 and events[0].event_id == 51, "pending events are bounded keeping newest ids")
+
+
+func test_night_curve() -> void:
+	for cell in [32.0, 40.0]:
+		for radius in [0.0, 1.0, 1.4]:
+			check(is_zero_approx(NightVisibility.darkness_at(radius * cell, 1, cell)), "original clear radius")
+		check(is_equal_approx(NightVisibility.darkness_at(1.9 * cell, 1, cell), 0.8), "exact dim anchor")
+		check(is_equal_approx(NightVisibility.darkness_at(2.4 * cell, 1, cell), 23.0 / 27.0), "exact faint-region value")
+		for radius in [3.4, 4.0]:
+			check(is_equal_approx(NightVisibility.darkness_at(radius * cell, 1, cell), 1.0), "full darkness")
+		for boundary in [1.4, 1.9, 3.4]:
+			var anchor := NightVisibility.darkness_at(boundary * cell, 1, cell)
+			for offset in [-0.0001, 0.0001]:
+				check(absf(NightVisibility.darkness_at((boundary + offset) * cell, 1, cell) - anchor) < 0.00001, "continuous boundary")
+		var previous := 0.0
+		for step in range(401):
+			var value := NightVisibility.darkness_at(step * 0.01 * cell, 1, cell)
+			check(value >= previous and value <= 1.0, "monotonic bounded curve")
+			check(is_equal_approx(value, NightVisibility.darkness_at(step * 0.01 * 40.0, 1, 40.0)), "cell-independent falloff")
+			previous = value
+		check(NightVisibility.within_audio_reach(1.9 * cell, 1, cell), "old audio boundary included")
+		check(not NightVisibility.within_audio_reach(1.9001 * cell, 1, cell), "audio boundary unchanged")
+
+
+func test_sight_pickup_shifts_both_regions_one_tile() -> void:
+	for step in range(401):
+		check(is_equal_approx(NightVisibility.darkness_at((step * 0.01 + 1.0) * 40.0, 2, 40.0), NightVisibility.darkness_at(step * 0.01 * 40.0, 1, 40.0)), "Sight shifts entire curve one tile")
+	check(is_zero_approx(NightVisibility.darkness_at(2.4 * 40, 2, 40)), "Sight clear radius")
+	check(is_equal_approx(NightVisibility.darkness_at(4.4 * 40, 2, 40), 1.0), "Sight full-dark radius")
+
+
+func test_outer_fade_does_not_expand_audio_reach(arena) -> void:
+	arena.selected_wall_mode = "night"
+	arena.new_round()
+	arena.networked = true
+	arena.viewer_slot = 0
+	check(arena.visible_tile(Vector2i(3, 1)) and not arena.within_audio_reach(Vector2i(3, 1)), "faint tile visible but silent")
+	check(arena.within_audio_reach(Vector2i(2, 1)), "near tile audible")
+	check(not arena.within_audio_reach(Vector2i(11, 9)), "opponent light does not extend audio")
+	arena.networked = false
+	check(arena.within_audio_reach(Vector2i(11, 9)), "local light combines viewers")
+	arena.networked = true
+	arena.viewer_slot = -1
+	check(arena.within_audio_reach(Vector2i(11, 9)), "spectator audio unrestricted")
+	arena.viewer_slot = 0
+	arena.game.round_over = true
+	check(arena.visible_tile(Vector2i(11, 9)) and arena.within_audio_reach(Vector2i(11, 9)), "results show full board")
+	arena.networked = false
+	arena.viewer_slot = -1
+	arena.selected_wall_mode = "fixed"
+	arena.new_round()
+
+
+func test_slide_state_covers_only_forced_segment() -> void:
+	var game = load("res://scripts/arena_game.gd").new()
+	game.wall_mode = "frost"
+	game.new_round()
+	clear_crates(game)
+	game.board[1][3] = game.OPEN
+	game.terrain[1][2] = 2
+	game.terrain[1][3] = 0
+	if not game.has_method("is_sliding"):
+		check(false, "slide query exists")
+		return
+	game.move_player(0, 0.1, Vector2.RIGHT)
+	check(not game.is_sliding(0), "walking onto ice is not a forced slide")
+	game.move_player(0, 0.2, Vector2.ZERO)
+	check(game.is_sliding(0), "forced segment is marked on entering ice")
+	var start: Vector2 = game.players[0].pos
+	game.move_player(0, 0.1, Vector2.ZERO)
+	check(game.is_sliding(0) and is_equal_approx(start.distance_to(game.players[0].pos), game.SPEED * 0.1), "slide retains movement speed after key release")
+	game.move_player(0, 0.2, Vector2.ZERO)
+	check(not game.is_sliding(0) and game.players[0].pos == game.center(Vector2i(3, 1)), "one extra tile ends on ordinary floor")
+	game.players[0].pos = game.center(Vector2i(1, 1))
+	game.board[1][3] = game.WALL
+	game.move_player(0, 0.3, Vector2.RIGHT)
+	check(not game.is_sliding(0), "blocked ice does not report sliding")
+	game.board[1][3] = game.OPEN
+	game.players[0].pos = game.center(Vector2i(1, 1))
+	game.move_player(0, 0.3, Vector2.RIGHT)
+	game.eliminate_disconnected(0)
+	check(not game.is_sliding(0), "death clears slide state")
+	game.new_round()
+	check(not game.is_sliding(0), "new round clears slide state")
+
+
+func test_terrain_coverage_tuning() -> void:
+	for mode in ["pond", "frost"]:
+		for count in [2, 6, 8, 10]:
+			var old_total := 0
+			var new_total := 0
+			var open_total := 0
+			for seed_value in [7, 42, 101, 2026]:
+				var game = load("res://scripts/arena_game.gd").new()
+				game.wall_mode = mode
+				game.player_count = count
+				game.rng.seed = seed_value
+				game.new_round()
+				var protected := {}
+				for player in game.players:
+					var spawn: Vector2i = game.tile_at(player.pos)
+					protected[spawn] = true
+					for direction in game.DIRECTIONS:
+						for distance in ([1, 2] if count >= 7 else [1]):
+							protected[spawn + direction * distance] = true
+				for y in range(1, game.HEIGHT - 1):
+					for x in range(1, game.WIDTH - 1):
+						var tile := Vector2i(x, y)
+						if protected.has(tile):
+							check(game.terrain[y][x] == 0, "%s %d spawn exits remain dry" % [mode, count])
+						if game.board[y][x] != game.OPEN:
+							check(game.terrain[y][x] == 0, "terrain only covers walkable cells")
+							continue
+						open_total += 1
+						var old_pattern: bool = y >= 3 and y < game.HEIGHT - 2 and y % 2 == 1 and absi(x - game.WIDTH / 2) <= (2 if mode == "pond" else 3)
+						if old_pattern and not protected.has(tile):
+							old_total += 1
+							check(game.terrain[y][x] != 0, "existing central terrain remains")
+						if game.terrain[y][x] != 0:
+							new_total += 1
+			print("Terrain coverage %s %d: %d -> %d / %d open" % [mode, count, old_total, new_total, open_total])
+			check(new_total >= old_total * 1.5 and new_total <= old_total * 2.7, "%s %d terrain coverage roughly doubles" % [mode, count])
+
+
+func test_map_movement_speed_tuning() -> void:
+	for mode in ["fixed", "random", "pond", "frost", "night"]:
+		var game = load("res://scripts/arena_game.gd").new()
+		game.wall_mode = mode
+		game.new_round()
+		clear_crates(game)
+		var start: Vector2 = game.players[0].pos
+		var spawn: Vector2i = game.tile_at(start)
+		var base_speed := 94.0 if mode == "pond" else 188.0
+		for pickup_count in range(4 if mode == "pond" else 1):
+			if pickup_count > 0:
+				game.players[0].pos = start
+				game.move_targets[0] = Vector2.ZERO
+				game.pickups[spawn] = game.PICKUP_SPEED
+				game.step(0.016, [Vector2.ZERO, Vector2.ZERO], [false, false])
+			var bonus := minf(pickup_count * 0.25, 0.5)
+			for surface in ([0, 1] if mode == "pond" else [0]):
+				game.players[0].pos = start
+				game.move_targets[0] = Vector2.ZERO
+				game.terrain[spawn.y][spawn.x] = surface
+				game.move_player(0, 0.1, Vector2.RIGHT)
+				var expected := base_speed * (1.0 + bonus) * (0.8 if surface == 1 else 1.0) * 0.1
+				check(is_equal_approx(start.distance_to(game.players[0].pos), expected), "%s surface %d pickup %d movement speed" % [mode, surface, pickup_count])

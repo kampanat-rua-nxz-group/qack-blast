@@ -86,7 +86,7 @@ func present(next_selected_mode: String, next_can_select: bool) -> void:
 	selected_label.text = "SELECTED FOR NEXT ROUND: %s" % MapCatalog.describe(selected_mode).name
 	permission_label.text = feedback if not feedback.is_empty() else "Only a room update confirms your selection." if can_select else "Browse any map. Only the host can select before the round."
 	for mode in map_buttons:
-		map_buttons[mode].text = MapCatalog.describe(mode).name + (" ✓" if mode == selected_mode else "")
+		map_buttons[mode].text = MapCatalog.describe(mode).name + (" [x]" if mode == selected_mode else "")
 	inspect(inspected_mode)
 
 
@@ -133,5 +133,8 @@ func _draw_preview() -> void:
 			elif rows[y][x] == "c":
 				color = colors.crate
 			preview.draw_rect(tile, color)
-	preview.draw_string(ThemeDB.fallback_font, Vector2(102, 30), "■  Wall     ■  Crate", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Ui.NAVY)
+	preview.draw_rect(Rect2(102, 19, 10, 10), colors.wall)
+	preview.draw_rect(Rect2(188, 19, 10, 10), colors.crate)
+	preview.draw_string(ThemeDB.fallback_font, Vector2(116, 30), "Wall", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Ui.NAVY)
+	preview.draw_string(ThemeDB.fallback_font, Vector2(202, 30), "Crate", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Ui.NAVY)
 	preview.draw_string(ThemeDB.fallback_font, Vector2(102, 55), "Routes, terrain and hazards vary.", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Ui.MUTED)

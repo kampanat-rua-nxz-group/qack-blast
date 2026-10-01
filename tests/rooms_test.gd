@@ -20,7 +20,7 @@ func _initialize() -> void:
 	check(registry.join_room(40, code, "Duck").ok, "fourth player joins")
 	check(registry.join_room(50, code, "Duck").ok, "fifth player joins")
 	check(registry.join_room(60, code, "Duck").ok, "sixth player joins")
-	check(not registry.join_room(70, code, "Duck").ok, "seventh connected player is rejected")
+	# Six-player regression remains a supported smaller room.
 	var room: Dictionary = registry.rooms[code]
 	check(room.people.map(func(person): return person.name) == ["Duck", "Duck#1", "Duck#2", "Duck#3", "Duck#4", "Duck#5"], "duplicate nicknames get distinct suffixes")
 	check(not registry.choose_map(20, "random") and registry.choose_map(10, "random"), "only host selects the map")
@@ -32,6 +32,12 @@ func _initialize() -> void:
 	registry.tick(3.0)
 	check(room.phase == "playing" and room.game.player_count == 6 and room.game.wall_mode == "random", "round uses selected map and six players")
 	var encoded := JSON.stringify(registry.game_view(room))
+	check(JSON.parse_string(encoded).players[0].sliding == false, "slide state survives JSON snapshot round trip")
+	room.game.slide_active[0] = true
+	room.game.move_targets[0] = room.game.center(Vector2i(2, 1))
+	check(JSON.parse_string(JSON.stringify(registry.game_view(room))).players[0].sliding, "active forced slide is transported")
+	room.game.slide_active[0] = false
+	room.game.move_targets[0] = Vector2.ZERO
 	check(JSON.parse_string(encoded).players.size() == 6, "authoritative snapshot can be sent as JSON")
 	var danger_bomb := {"tile": Vector2i(3, 3), "owner": -1, "range": 0, "time": 5.0, "danger": true}
 	room.game.bombs.append(danger_bomb)
@@ -65,6 +71,7 @@ func _initialize() -> void:
 	for peer_id in [20, 30, 40, 50, 60, 70]:
 		registry.leave(peer_id)
 	check(not registry.rooms.has(code), "room and scores disappear when last peer leaves")
+	test_ten_connected_admission()
 	test_countdown_freezes_game_clock()
 	test_countdown_transitions_once()
 	test_countdown_rejects_start_map_and_input()
@@ -228,7 +235,7 @@ func test_snapshot_identity_and_targets() -> void:
 
 func test_expanded_geometry_snapshot() -> void:
 	var registry = load("res://scripts/room_registry.gd").new()
-	check(registry.MAX_CONNECTED == 6, "rules expansion does not open public room capacity")
+	check(registry.MAX_CONNECTED == 10, "online capacity is ten connected participants")
 	var created: Dictionary = registry.create_room(1, "A")
 	registry.join_room(2, created.code, "B")
 	registry.start_round(1)
@@ -426,3 +433,37 @@ func test_room_events_are_bounded() -> void:
 	check(room.events.size() <= registry.MAX_ROOM_EVENTS, "undrained room batch stays bounded")
 	var batch: Array = registry.take_room_events(room)
 	check(batch[-1].event_id == 2000, "bounded batch keeps the newest events")
+
+
+func test_ten_connected_admission() -> void:
+	var registry = load("res://scripts/room_registry.gd").new()
+	var created: Dictionary = registry.create_room(1, "Duck")
+	var room: Dictionary = registry.rooms[created.code]
+	for peer in range(2, 11):
+		check(registry.join_room(peer, created.code, "Duck").ok, "connected participant %d admitted" % peer)
+	check(room.people.size() == 10 and room.people[9].name == "Duck#9" and created.code.length() == 6, "ten admissions preserve nickname suffixes and six-character code")
+	check(registry.join_room(11, created.code, "Duck") == {"ok": false, "error": "Room is full"}, "eleventh connected participant receives existing full-room error")
+	if room.people.size() != 10:
+		return
+	check(registry.start_round(1), "ten connected ducks enter countdown")
+	registry.tick(3.0)
+	var identities: Array = room.game.players.map(func(player): return player.avatar_id)
+	registry.leave(1)
+	check(room.host == room.people[1].id and room.game.players[0].alive, "ten-player host departure transfers host and retains grace avatar")
+	check(registry.join_room(11, created.code, "Duck").ok, "offline history frees a connected slot")
+	check(room.people.back().slot == -1 and not registry.set_input(11, Vector2.RIGHT, true), "replacement spectates without controlling a duck")
+	check(not registry.join_room(12, created.code, "Duck").ok, "spectator consumes tenth connection slot")
+	check(room.game.players.size() == 10 and room.game.players.map(func(player): return player.avatar_id) == identities, "replacement preserves ten live visual identities")
+	registry.tick(29.99)
+	check(room.game.players[0].alive, "ten-player disconnect avatar survives until thirty seconds")
+	registry.tick(0.02)
+	check(not room.game.players[0].alive and room.people[0].scores.kills == 0, "ten-player grace expires without Kill credit")
+	for i in range(10):
+		room.game.players[i].alive = i == 9
+	room.game.resolve_round()
+	registry.tick(0.0)
+	check(room.phase == "results" and room.people[9].scores.wins == 1, "tenth duck reaches results with persisted Win")
+	check(registry.start_round(2) and room.game.players.size() == 10, "replacement joins ten-duck rematch")
+	check(room.people[9].slot == 8 and room.game.scores[8].wins == 1 and room.game.players[8].avatar_id == identities[9], "slot change preserves tenth player's identity and score")
+	registry.leave(2)
+	check(room.phase == "lobby" and room.host == room.people[2].id and room.game == null, "ten-player countdown departure cancels and transfers host")

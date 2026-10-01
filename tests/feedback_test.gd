@@ -13,7 +13,9 @@ func _initialize() -> void:
 	test_new_round_events_wait_for_matching_state()
 	test_muted_events_keep_visual_feedback()
 	test_night_hidden_event_has_no_positional_cue()
+	test_outer_fade_does_not_expand_audio_reach()
 	test_personal_elimination_and_causes()
+	test_local_pickup_names_collecting_player()
 	test_upgrade_notices()
 	test_outcomes_do_not_assign_spectator_result()
 	test_voice_cap_and_bounded_state()
@@ -78,10 +80,11 @@ func test_new_round_events_wait_for_matching_state() -> void:
 	feedback.reset(1, 0)
 	feedback.consume_events(2, [exploded(1)], context())
 	check(feedback.cues.is_empty(), "future round events wait")
+	feedback.consume_events(2, [placed(2)], context())
 	feedback.reset(2, 0)
-	check(feedback.cues == ["explode"], "queued events present once matching state arrives")
+	check(feedback.cues == ["explode", "place"], "multiple queued batches present once matching state arrives")
 	feedback.consume_events(2, [exploded(1)], context())
-	check(feedback.cues == ["explode"], "queued event is not presented twice")
+	check(feedback.cues == ["explode", "place"], "queued event is not presented twice")
 	var flood := make()
 	flood.reset(0, 0)
 	for round in range(1, 40):
@@ -96,6 +99,7 @@ func test_muted_events_keep_visual_feedback() -> void:
 	feedback.consume_events(1, [eliminated(1, 1), {"event_id": 2, "kind": "pickup_collected", "player": 0, "tile": [1, 1], "pickup": ArenaGame.PICKUP_BOMB_CAPACITY, "granted": true}], context())
 	check(feedback.cues.is_empty(), "muted plays no sound")
 	check(not feedback.effects.is_empty() and feedback.notice == "BOMB +1", "muted still shows elimination effect and upgrade notice")
+	check(feedback.voice_count() == 0, "mute stops active voices")
 	feedback.set_muted(false)
 	feedback.consume_events(1, [exploded(3)], context())
 	check(feedback.cues == ["explode"], "unmuting resumes sound")
@@ -182,6 +186,9 @@ func test_voice_cap_and_bounded_state() -> void:
 		big.append(placed(i))
 	feedback.consume_events(1, big, context())
 	check(feedback.seen_count() <= GameFeedback.MAX_SEEN, "dedupe memory stays bounded")
+	var count := feedback.cues.size()
+	feedback.consume_events(1, [placed(1)], context())
+	check(feedback.cues.size() == count, "evicted old event cannot replay")
 
 
 func test_urgency_only_in_final_window() -> void:
@@ -235,3 +242,25 @@ func check(condition: bool, message: String) -> void:
 func finish() -> void:
 	print("Feedback checks: %d failure(s)" % failures)
 	quit(1 if failures else 0)
+
+
+func test_outer_fade_does_not_expand_audio_reach() -> void:
+	var feedback := make()
+	feedback.reset(1, 0)
+	var night := context(0, {"wall_mode": "night", "visible": func(_tile: Array) -> bool: return true, "audio_reach": func(tile: Array) -> bool: return tile == [2, 1]})
+	feedback.consume_events(1, [eliminated(1, 1)], night)
+	check(feedback.cues.is_empty() and feedback.effects.size() == 1, "faint elimination effect shown without audio")
+	feedback.consume_events(1, [placed(2, [2, 1])], night)
+	check(feedback.cues == ["place"], "near event sounds")
+	feedback.consume_events(1, [placed(3, [5, 5], 0)], night)
+	check(feedback.cues == ["place", "place"], "own event remains audible")
+	feedback.consume_events(1, [exploded(4)], context(0, {"wall_mode": "night", "local_play": true, "audio_reach": func(_tile: Array) -> bool: return false}))
+	check(feedback.cues.back() == "explode", "local audio remains unrestricted")
+
+
+func test_local_pickup_names_collecting_player() -> void:
+	var feedback := make()
+	feedback.reset(1, 0)
+	for player in [0, 1]:
+		feedback.consume_events(1, [{"event_id": player + 1, "kind": "pickup_collected", "player": player, "pickup": ArenaGame.PICKUP_BOMB_CAPACITY, "granted": true}], context(-1, {"local_play": true}))
+		check(feedback.notice == "P%d: BOMB +1" % (player + 1), "local pickup identifies collecting duck")

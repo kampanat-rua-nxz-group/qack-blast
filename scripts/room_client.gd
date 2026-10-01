@@ -25,6 +25,7 @@ const MAX_PENDING_EVENT_MESSAGES = 8
 var pending_events: Array = []
 var event_round := -1
 var event_cursor := 0
+var event_floor := 0
 var events_synced := false
 
 
@@ -95,6 +96,38 @@ func _process(_delta: float) -> void:
 			accept(message, generation)
 
 
+static func valid_snapshot_geometry(snapshot: Dictionary) -> bool:
+	var geometry = snapshot.get("geometry")
+	if not geometry is Dictionary:
+		return false
+	for key in ["width", "height", "cell"]:
+		if not typeof(geometry.get(key)) in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(geometry[key])):
+			return false
+	var width := int(geometry.width)
+	var height := int(geometry.height)
+	if width != float(geometry.width) or height != float(geometry.height) or width < 3 or height < 3 or width > 19 or height > 17 or float(geometry.cell) <= 0.0:
+		return false
+	if not Vector3(width, height, float(geometry.cell)) in [Vector3(13, 11, 52), Vector3(15, 13, 44), Vector3(17, 15, 44), Vector3(19, 17, 44)]:
+		return false
+	var origin = geometry.get("origin")
+	if not origin is Array or origin.size() != 2:
+		return false
+	for value in origin:
+		if not typeof(value) in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(value)):
+			return false
+	for key in ["board", "terrain"]:
+		var rows = snapshot.get(key, [])
+		if not rows is Array or rows.size() != height:
+			return false
+		for row in rows:
+			if not row is Array or row.size() != width:
+				return false
+			for tile in row:
+				if not typeof(tile) in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(tile)):
+					return false
+	return true
+
+
 func accept(message: Dictionary, generation: int = -1) -> void:
 	if generation >= 0 and generation != transport_generation:
 		return
@@ -108,7 +141,10 @@ func accept(message: Dictionary, generation: int = -1) -> void:
 		"room":
 			room = message
 			room_changed.emit(room)
+			flush_pending_events()
 		"game":
+			if not valid_snapshot_geometry(message):
+				return
 			var next_round := int(message.round_id)
 			if next_round < int(room.get("round_id", -1)):
 				return
@@ -134,6 +170,7 @@ func reset_events() -> void:
 	pending_events.clear()
 	event_round = -1
 	event_cursor = 0
+	event_floor = 0
 	events_synced = false
 
 
@@ -144,12 +181,15 @@ func sync_event_round(snapshot: Dictionary) -> void:
 	event_round = round_id
 	# First state after joining or reconnecting starts at the server cursor; later rounds start fresh.
 	event_cursor = 0 if events_synced else int(snapshot.get("event_cursor", 0))
+	event_floor = event_cursor
 	events_synced = true
 
 
 func accept_events(message: Dictionary) -> void:
 	var round_id := int(message.get("round_id", -1))
-	if game.is_empty() or round_id > int(game.round_id):
+	if round_id < int(room.get("round_id", -1)):
+		return
+	if game.is_empty() or round_id > int(game.round_id) or round_id > int(room.get("round_id", -1)):
 		pending_events.append(message)
 		while pending_events.size() > MAX_PENDING_EVENT_MESSAGES:
 			pending_events.pop_front()
@@ -158,11 +198,15 @@ func accept_events(message: Dictionary) -> void:
 
 
 func flush_pending_events() -> void:
+	if game.is_empty():
+		return
 	var waiting := pending_events
 	pending_events = []
 	for message in waiting:
 		var round_id := int(message.get("round_id", -1))
-		if round_id > int(game.round_id):
+		if round_id < int(room.get("round_id", -1)):
+			continue
+		if round_id > int(game.round_id) or round_id > int(room.get("round_id", -1)):
 			pending_events.append(message)
 		elif round_id == int(game.round_id):
 			deliver_events(round_id, message.get("events", []))

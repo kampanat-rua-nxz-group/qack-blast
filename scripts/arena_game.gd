@@ -24,6 +24,7 @@ const HAZARD_WARNING = 5.0
 const DANGER_START = SUDDEN_DEATH_START + HAZARD_WARNING
 const DANGER_INTERVAL = HAZARD_INTERVAL
 const DANGER_WARNING = HAZARD_WARNING
+const LILY_BASE_SPEED_MULTIPLIER = 0.5
 const WATER_SPEED_MULTIPLIER = 0.8
 const SPEED_PICKUP_INCREMENT = 0.25
 const SPEED_BONUS_MAX = 0.5
@@ -136,16 +137,21 @@ func new_round() -> bool:
 			board[tile.y][tile.x] = OPEN
 	for i in range(1, spawns.size()):
 		ensure_spawn_route(spawns[0], spawns[i])
+	# Fill the central band on every interior row without consuming gameplay RNG.
 	if wall_mode == "pond":
 		for y in range(3, HEIGHT - 2):
 			for x in range(1, WIDTH - 1):
-				if absi(x - WIDTH / 2) <= 2 and y % 2 == 1 and board[y][x] == OPEN:
+				if absi(x - WIDTH / 2) <= 2 and board[y][x] == OPEN:
 					terrain[y][x] = 1
 	elif wall_mode == "frost":
 		for y in range(3, HEIGHT - 2):
 			for x in range(1, WIDTH - 1):
-				if absi(x - WIDTH / 2) <= 3 and y % 2 == 1 and board[y][x] == OPEN:
+				if absi(x - WIDTH / 2) <= 3 and board[y][x] == OPEN:
 					terrain[y][x] = 2
+	for spawn in spawns:
+		for tile in [spawn, spawn + Vector2i.LEFT, spawn + Vector2i.RIGHT, spawn + Vector2i.UP, spawn + Vector2i.DOWN]:
+			if inside(tile):
+				terrain[tile.y][tile.x] = 0
 	for tile in escape_tiles:
 		terrain[tile.y][tile.x] = 0
 	players = []
@@ -560,6 +566,10 @@ func try_kick_bomb(tile: Vector2i, direction: Vector2i) -> bool:
 	return false
 
 
+func is_sliding(player_index: int) -> bool:
+	return player_index >= 0 and player_index < players.size() and player_index < slide_active.size() and player_index < move_targets.size() and players[player_index].alive and slide_active[player_index] and move_targets[player_index] != Vector2.ZERO
+
+
 func move_player(i: int, delta: float, direction: Vector2) -> void:
 	var target: Vector2 = move_targets[i]
 	if target == Vector2.ZERO:
@@ -569,7 +579,7 @@ func move_player(i: int, delta: float, direction: Vector2) -> void:
 		target = move_targets[i]
 		if target == Vector2.ZERO:
 			return
-	var speed: float = SPEED * (1.0 + players[i].speed_bonus)
+	var speed: float = SPEED * (LILY_BASE_SPEED_MULTIPLIER if wall_mode == "pond" else 1.0) * (1.0 + players[i].speed_bonus)
 	if terrain[tile_at(players[i].pos).y][tile_at(players[i].pos).x] == 1:
 		speed *= WATER_SPEED_MULTIPLIER
 	var travel_direction := Vector2i(int(sign(target.x - players[i].pos.x)), int(sign(target.y - players[i].pos.y)))
@@ -757,6 +767,7 @@ func eliminate(i: int, cause: Dictionary) -> void:
 	if not players[i].alive:
 		return
 	players[i].alive = false
+	slide_active[i] = false
 	players[i].elimination_cause = cause
 	emit_event("player_eliminated", {"player": i, "tile": tile_array(tile_at(players[i].pos)), "cause": cause})
 

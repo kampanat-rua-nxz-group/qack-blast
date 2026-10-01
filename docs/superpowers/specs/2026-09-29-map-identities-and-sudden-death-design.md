@@ -28,7 +28,7 @@ Give each of the five maps a distinct gameplay effect and map-specific pickup. K
 
 ## Lily Pond
 
-- Add a fixed pattern of clearly marked shallow-water tiles on otherwise open cells. Shallow water slows ducks to 80% of normal movement speed while crossing it. It does not affect bombs or block blasts. Keep spawn cells and their first exit dry.
+- Add a fixed pattern of clearly marked shallow-water tiles on otherwise open cells. Lily Pond starts ducks at 50% of normal movement speed everywhere (94 px/s). Shallow water applies an additional 80% multiplier while crossing it (75.2 px/s before pickups). It does not affect bombs or block blasts. Keep spawn cells and their first exit dry.
 - Add a Speed pickup. Each pickup increases that duck's movement speed everywhere by 25% of base speed, capped at 150% of base speed. The water multiplier still applies after the boost.
 - Sudden death turns outer rings of the playable board into deep water, one ring per wave, moving inward. Mark the next ring during the five-second warning. Deep water eliminates ducks on those tiles and remains impassable afterward. Bombs and pickups on flooded tiles are removed. The remaining dry cells stay connected until the last ring.
 
@@ -60,3 +60,23 @@ Give each of the five maps a distinct gameplay effect and map-specific pickup. K
 ## Playtest values
 
 The 3:00 sudden-death start, 15-second wave interval, water 80% speed, Speed pickup +25% (150% cap), and bomb movement rate of four tiles per second are tuning values. Keep them as named constants in the rules engine so playtesting can adjust them without changing the behavior contracts above.
+
+
+## September 30 terrain and speed amendment
+
+Approved playtest tuning: keep the central terrain bands but fill their even rows as well as odd rows. Lily uses columns within two cells of the board midpoint; Frost uses columns within three. Both use rows 3 through `HEIGHT - 3`, only on cells already OPEN after crates and spawn routes are generated. No extra random draws are made. Spawn cells and all legal adjacent exits stay dry, and the existing two-cell escape crosses on 7–10 player maps stay dry. Walls, crates, spawn selection, route generation, water's 80% multiplier, and Frost's one-tile slide at normal speed remain unchanged.
+
+Across seeds 7, 42, 101, and 2026, aggregate terrain/open-cell counts are:
+
+| Map | Players | Before | After | Open cells | Ratio |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Lily Pond | 2 | 18 | 40 | 194 | 2.22× |
+| Lily Pond | 6 | 38 | 69 | 328 | 1.82× |
+| Lily Pond | 8 | 39 | 95 | 484 | 2.44× |
+| Lily Pond | 10 | 57 | 114 | 600 | 2.00× |
+| Frost Garden | 2 | 36 | 54 | 187 | 1.50× |
+| Frost Garden | 6 | 34 | 89 | 327 | 2.62× |
+| Frost Garden | 8 | 68 | 120 | 468 | 1.76× |
+| Frost Garden | 10 | 60 | 147 | 594 | 2.45× |
+
+The approximate doubling varies with wall alignment, crates, and protected spawn exits. Lily's `LILY_BASE_SPEED_MULTIPLIER` is 0.5. Its Speed pickups remain proportional to its map base: dry movement is 94, 117.5, and 141 px/s at zero, one, and two pickups; water movement is 75.2, 94, and 112.8 px/s. Further pickups keep the 50% bonus cap. Every other map retains 188 px/s starting movement. These changes require a fresh playtest; earlier presentation feedback does not validate this tuning.

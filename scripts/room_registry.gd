@@ -3,7 +3,7 @@ extends RefCounted
 const ArenaGame = preload("res://scripts/arena_game.gd")
 const CharacterCatalog = preload("res://scripts/character_catalog.gd")
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-const MAX_CONNECTED = 6
+const MAX_CONNECTED = 10
 const DISCONNECT_GRACE = 30.0
 const MAX_ROOM_EVENTS = 256
 
@@ -256,7 +256,7 @@ func game_view(room: Dictionary) -> Dictionary:
 	for i in range(game.players.size()):
 		var player: Dictionary = game.players[i]
 		var target: Vector2 = game.move_targets[i]
-		players.append({"pos": [player.pos.x, player.pos.y], "move_target": [target.x, target.y], "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.speed_bonus, "can_kick": player.can_kick, "facing": player.facing, "avatar_id": player.get("avatar_id", i), "elimination_cause": player.get("elimination_cause", {}).duplicate(true)})
+		players.append({"pos": [player.pos.x, player.pos.y], "move_target": [target.x, target.y], "sliding": game.is_sliding(i), "alive": player.alive, "bomb_limit": player.bomb_limit, "range": player.range, "vision": player.vision, "speed_bonus": player.speed_bonus, "can_kick": player.can_kick, "facing": player.facing, "avatar_id": player.get("avatar_id", i), "elimination_cause": player.get("elimination_cause", {}).duplicate(true)})
 	var bombs := []
 	for bomb in game.bombs:
 		var kick_direction: Vector2i = bomb.get("kick_direction", Vector2i.ZERO)

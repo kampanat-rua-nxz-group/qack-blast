@@ -3,8 +3,11 @@ extends Node2D
 const ArenaGame = preload("res://scripts/arena_game.gd")
 const ArenaBoard = preload("res://scripts/arena_board.gd")
 const CharacterCatalog = preload("res://scripts/character_catalog.gd")
+const GameFeedback = preload("res://scripts/game_feedback.gd")
 const COLORS = ArenaBoard.COLORS
 const BOARD_REGION = Rect2(142, 82, 676, 572)
+const NOTICE_BASELINE := Vector2(480, 640)
+const CAUSE_BASELINE := Vector2(480, 620)
 
 var board:
 	get:
@@ -23,17 +26,52 @@ var networked := false
 var viewer_slot := -1
 var player_names: Array[String] = []
 var countdown_text := ""
+var feedback = GameFeedback.new()
+var local_round := 0
+var local_mute_button: Button
 
 
 func _ready() -> void:
+	feedback.host = self
+	feedback.load_preference()
+	feedback.unlocked = not OS.has_feature("web")
 	background.draw.connect(_draw_background)
 	game.rng.randomize()
 	new_round()
+	if not networked:
+		build_local_mute()
+
+
+func build_local_mute() -> void:
+	if local_mute_button == null:
+		local_mute_button = Button.new()
+		local_mute_button.name = "LocalMuteButton"
+		local_mute_button.position = Vector2(832, 24)
+		local_mute_button.size = Vector2(118, 38)
+		local_mute_button.focus_mode = Control.FOCUS_NONE
+		local_mute_button.add_theme_font_size_override("font_size", 13)
+		add_child(local_mute_button)
+		local_mute_button.pressed.connect(_toggle_local_mute)
+		_render_local_mute()
+
+
+func _toggle_local_mute() -> void:
+	feedback.unlock()
+	feedback.set_muted(not feedback.muted)
+	_render_local_mute()
+
+
+func _render_local_mute() -> void:
+	local_mute_button.text = "Sound: OFF" if feedback.muted else "Sound: ON"
 
 
 func new_round() -> void:
 	game.wall_mode = selected_wall_mode
 	game.new_round()
+	if not networked:
+		game.take_events()
+		local_round += 1
+		feedback.reset(local_round, 0)
 	previous_drop.clear()
 	held_directions.clear()
 	visual_facing.clear()
@@ -44,6 +82,14 @@ func new_round() -> void:
 		visual_facing.append(0.0)
 		walk_phase.append(0.0)
 	present_board()
+
+
+func _process(delta: float) -> void:
+	if not networked:
+		feedback.consume_events(local_round, game.take_events(), {"viewer_slot": -1, "wall_mode": game.wall_mode, "names": [], "local_play": true})
+	feedback.tick(delta)
+	if not feedback.notice.is_empty() or not feedback.personal_cause.is_empty() or not feedback.effects.is_empty():
+		queue_redraw()
 
 
 func _physics_process(delta: float) -> void:
@@ -75,6 +121,8 @@ func _physics_process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if not event is InputEventKey or event.echo:
 		return
+	if event.pressed and not feedback.unlocked:
+		feedback.unlock()
 	if event.pressed and event.keycode == KEY_M:
 		selected_wall_mode = ArenaGame.MAP_MODES[(ArenaGame.MAP_MODES.find(selected_wall_mode) + 1) % ArenaGame.MAP_MODES.size()]
 		queue_redraw()
@@ -106,7 +154,7 @@ func _input(event: InputEvent) -> void:
 func _draw() -> void:
 	var font := ThemeDB.fallback_font
 	draw_string(font, Vector2(142, 43), "QACK BLAST", HORIZONTAL_ALIGNMENT_LEFT, -1, 31, Color("403d57"))
-	draw_string(font, Vector2(143, 66), "a tiny bomb battle for 2-6", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("867f91"))
+	draw_string(font, Vector2(143, 66), "a tiny bomb battle for 2-10" if networked else "a tiny bomb battle for 2", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("867f91"))
 	rounded_box(Rect2(704, 24, 114, 38), Color("ffe1a6"), 19.0)
 	centered_text("%s  %dP" % ["ONLINE" if networked else "LOCAL", game.players.size()], Vector2(761, 49), 15, Color("73512d"))
 	centered_text("%s  %d:%02d" % [ArenaGame.MAP_NAMES[game.wall_mode].to_upper(), int(game.round_elapsed) / 60, int(game.round_elapsed) % 60], Vector2(635, 49), 13, Color("73512d"))
@@ -120,6 +168,7 @@ func _draw() -> void:
 	rounded_box(Rect2(416, 667, 402, 29), Color("f9e8ed"), 14.0)
 	centered_text("WASD / ARROWS + SPACE / ENTER" if networked else "P1  WASD  +  SPACE", Vector2(271, 687), 12 if networked else 14, Color("366b68"))
 	centered_text((spectator_text() if viewer_slot < 0 else "ROOM HOST STARTS NEXT ROUND") if networked else "P2 ARROWS + ENTER  |  M NEXT MAP  R START", Vector2(617, 687), 12, Color("92536b"))
+	draw_feedback()
 	if networked and not countdown_text.is_empty():
 		draw_rect(BOARD_REGION, Color("44395488"))
 		rounded_box(Rect2(350, 246, 260, 188), Color("fffaf0"), 25.0)
@@ -140,6 +189,13 @@ func _draw() -> void:
 			centered_text("%d. %s    WINS %d    KILLS %d" % [rank + 1, player_label(i), game.scores[i].wins, game.scores[i].kills], Vector2(476, panel_y + 107 + rank * 23), 13, Color("403d57"))
 		rounded_box(Rect2(352, button_y, 248, 36), Color("ffe1a6"), 18.0)
 		centered_text("RETURN TO ROOM" if networked else "PRESS R TO PLAY AGAIN", Vector2(476, button_y + 24), 16, Color("73512d"))
+
+
+func draw_feedback() -> void:
+	if not feedback.personal_cause.is_empty():
+		centered_text(feedback.personal_cause, CAUSE_BASELINE, 20, Color("c35162"))
+	if not feedback.notice.is_empty():
+		centered_text(feedback.notice, NOTICE_BASELINE, 22, Color("366b68"))
 
 
 func rounded_box(rect: Rect2, color: Color, radius: float, canvas: CanvasItem = self) -> void:
@@ -195,6 +251,11 @@ func vision_darkness(point: Vector2) -> float:
 	return board.vision_darkness(point)
 
 
+func within_audio_reach(tile: Vector2i) -> bool:
+	_sync_board_view()
+	return board.within_audio_reach(tile)
+
+
 func draw_duck(pos: Vector2, player_index: int, angle: float = 0.0, phase: float = 0.0) -> void:
 	board.draw_duck(pos, player_index, angle, phase, self)
 
@@ -203,6 +264,7 @@ func _sync_board_view() -> void:
 	board.networked = networked
 	board.visual_facing = visual_facing
 	board.walk_phase = walk_phase
+	board.feedback_effects = feedback.effects
 	board.game = game
 	board.viewer_slot = viewer_slot
 	board.spawn_marker_slot = viewer_slot if networked and viewer_slot >= 0 and viewer_slot < game.players.size() and game.players[viewer_slot].alive and not game.round_over and game.round_elapsed < 2.5 else -1
