@@ -32,6 +32,11 @@ func _initialize() -> void:
 	test_controller_fairness()
 	test_controller_reset()
 	test_prediction_legal_timing()
+	test_static_route_search_is_bounded()
+	if "--benchmark-bots" in OS.get_cmdline_user_args():
+		benchmark_bot_decisions()
+	else:
+		test_seeded_bot_smoke_rounds()
 	print("Bot checks: %d failure(s)" % failures)
 	quit(1 if failures else 0)
 
@@ -841,3 +846,81 @@ func test_prediction_legal_timing() -> void:
 	game.hazards = [{"kind": "closing_walls", "tiles": [Vector2i(4, 3)], "time": 0.1}]
 	bot = controller("hard")
 	check(not bot.advance(0.0, observe(game)).plant, "unsafe actual attack arrival refuses planting")
+
+
+func test_static_route_search_is_bounded() -> void:
+	var game = make_open_game()
+	var bot = controller("easy")
+	if bot == null:
+		return
+	bot.advance(0.0, observe(game))
+	check(bot.diagnostics().expanded_nodes < 100, "static safe-map routing avoids a large time-expanded search")
+
+
+func test_seeded_bot_smoke_rounds() -> void:
+	var Registry = load("res://scripts/room_registry.gd")
+	var modes := ["fixed", "random", "pond", "frost", "night"]
+	var difficulties := ["easy", "medium", "hard", "extreme"]
+	var seeds := [7, 42, 101, 2026]
+	for seed_value in seeds:
+		for mode in modes:
+			for difficulty in difficulties:
+				for player_count in [2, 10]:
+					var registry = Registry.new()
+					registry.rng.seed = seed_value
+					var created: Dictionary = registry.create_room(100, "Human")
+					for index in range(1, player_count - 1):
+						registry.join_room(100 + index, created.code, "Player%d" % index)
+					registry.add_bot(100, difficulty)
+					registry.choose_map(100, mode)
+					check(registry.start_round(100), "smoke starts %s %s %d seed %d" % [mode, difficulty, player_count, seed_value])
+					var room: Dictionary = registry.rooms[created.code]
+					room.game.rng.seed = seed_value
+					registry.tick(2.5)
+					var bot_person: Dictionary = room.people.back()
+					var controller = room.bot_controllers[bot_person.id]
+					check(room.phase == "countdown" and controller.diagnostics().decision_count == 0, "smoke bot waits before GO")
+					registry.tick(0.5)
+					check(room.phase == "playing" and room.game.player_count == player_count, "smoke starts expected %d-player geometry" % player_count)
+					check(room.game.WIDTH == (13 if player_count == 2 else 19), "smoke uses normal map geometry")
+					var profile: Dictionary = load("res://scripts/bot_profiles.gd").get_profile(difficulty)
+					for frame in range(600):
+						if room.phase != "playing":
+							break
+						registry.tick(1.0 / 60.0)
+						check(room.directions[bot_person.slot] in [Vector2.ZERO, Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN], "smoke emits cardinal held direction")
+						check(room.move_presses[bot_person.slot] in [Vector2.ZERO, Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN], "smoke emits cardinal move press")
+						var diagnostics: Dictionary = controller.diagnostics()
+						check(diagnostics.candidate_count <= profile.candidate_limit and diagnostics.expanded_nodes <= profile.candidate_limit * 8192, "smoke respects candidate and route-search bounds")
+						check(room.game.wall_mode == mode and room.game.player_count == player_count, "smoke retains selected map and lineup")
+						if room.phase != "playing":
+							break
+					check(room.game.round_elapsed >= 9.9 or room.game.round_over, "smoke advances ten simulated seconds or resolves naturally")
+
+
+func benchmark_bot_decisions() -> void:
+	var modes := ["fixed", "random", "pond", "frost", "night"]
+	for mode in modes:
+		for difficulty in ["easy", "medium", "hard", "extreme"]:
+			for player_count in [2, 10]:
+				var game = make_open_game(mode, player_count)
+				var bot = controller(difficulty)
+				if bot == null:
+					continue
+				bot.configure(0, difficulty, 2026)
+				var o := observe(game)
+				var samples: Array[float] = []
+				var candidates := 0
+				var expanded := 0
+				for sample in range(20):
+					var delta: float = 0.0 if sample == 0 else load("res://scripts/bot_profiles.gd").get_profile(difficulty).interval_max + 0.01
+					var started := Time.get_ticks_usec()
+					bot.advance(delta, o)
+					samples.append(float(Time.get_ticks_usec() - started) / 1000.0)
+					var diagnostics: Dictionary = bot.diagnostics()
+					candidates += diagnostics.candidate_count
+					expanded += diagnostics.expanded_nodes
+				samples.sort()
+				print("Bot benchmark %s %s %d-player: decisions=%d candidates=%d expanded=%d p50=%.3fms p95=%.3fms max=%.3fms" % [
+					mode, difficulty, player_count, samples.size(), candidates, expanded,
+					samples[9], samples[18], samples.back()])

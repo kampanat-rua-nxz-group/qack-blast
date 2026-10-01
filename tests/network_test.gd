@@ -124,6 +124,7 @@ func _process(delta: float) -> bool:
 				if message.get("type") == "room" and message.ready_player_count == 2 and message.people.back().kind == "bot":
 					var bot: Dictionary = message.people.back()
 					check(bot.kind == "bot" and not bot.connected and bot.difficulty == "medium", "WebSocket bot add returns authoritative metadata")
+					request(0, {"type": "map", "mode": "pond"})
 					request(0, {"type": "start"})
 					inbox[0].clear()
 					phase = 7
@@ -135,7 +136,7 @@ func _process(delta: float) -> bool:
 				return false
 			if solo_room.phase == "playing":
 				var bot_person: Dictionary = solo_room.people.back()
-				check(solo_room.game.players.size() == 2 and bot_person.peer == 0, "solo loopback starts two-player game without bot socket")
+				check(solo_room.game.players.size() == 2 and bot_person.peer == 0 and solo_room.game.wall_mode == "pond", "solo loopback starts selected map without bot socket")
 				solo_room.game.players[bot_person.slot].alive = false
 				solo_room.game.resolve_round()
 				server.registry.tick(0.0)
@@ -154,6 +155,19 @@ func _process(delta: float) -> bool:
 				if message.get("type") == "room" and message.phase == "countdown" and message.round_id == 3:
 					var solo_room: Dictionary = server.registry.rooms[room_code]
 					check(solo_room.game.player_count == 2 and solo_room.people.back().difficulty == "extreme", "solo replay preserves bot identity and chosen difficulty")
+					server.registry.tick(3.0)
+					var bot_person: Dictionary = solo_room.people.back()
+					solo_room.game.players[bot_person.slot].alive = false
+					solo_room.game.resolve_round()
+					server.registry.tick(0.0)
+					request(0, {"type": "bot_remove", "person_id": bot_person.id})
+					inbox[0].clear()
+					phase = 10
+					break
+		10:
+			for message in inbox[0]:
+				if message.get("type") == "room" and message.phase == "results" and message.people.all(func(person): return person.get("kind", "human") != "bot"):
+					check(server.registry.rooms[room_code].people.all(func(person): return person.get("kind", "human") != "bot"), "host removes bot after replay results")
 					print("Network checks: %d failure(s)" % failures)
 					server.socket.close()
 					for client in clients:
