@@ -570,6 +570,39 @@ func is_sliding(player_index: int) -> bool:
 	return player_index >= 0 and player_index < players.size() and player_index < slide_active.size() and player_index < move_targets.size() and players[player_index].alive and slide_active[player_index] and move_targets[player_index] != Vector2.ZERO
 
 
+static func movement_speed_for(mode: String, terrain_kind: int, speed_bonus: float) -> float:
+	var speed := SPEED * (LILY_BASE_SPEED_MULTIPLIER if mode == "pond" else 1.0) * (1.0 + speed_bonus)
+	return speed * WATER_SPEED_MULTIPLIER if terrain_kind == 1 else speed
+
+
+static func blast_tiles(cells: Array, origin: Vector2i, blast_range: int, danger: bool, crates_at_start: Dictionary) -> Array[Vector2i]:
+	var tiles: Array[Vector2i] = []
+	if cells.is_empty():
+		return tiles
+	var height := cells.size()
+	var width: int = cells[0].size()
+	if origin.x < 0 or origin.y < 0 or origin.x >= width or origin.y >= height:
+		return tiles
+	if danger:
+		# Keep the authoritative row-then-column processing order.
+		for x in range(width):
+			tiles.append(Vector2i(x, origin.y))
+		for y in range(height):
+			if y != origin.y:
+				tiles.append(Vector2i(origin.x, y))
+		return tiles
+	tiles.append(origin)
+	for direction in DIRECTIONS:
+		for distance in range(1, blast_range + 1):
+			var tile: Vector2i = origin + direction * distance
+			if tile.x < 0 or tile.y < 0 or tile.x >= width or tile.y >= height or cells[tile.y][tile.x] == WALL:
+				break
+			tiles.append(tile)
+			if crates_at_start.has(tile):
+				break
+	return tiles
+
+
 func move_player(i: int, delta: float, direction: Vector2) -> void:
 	var target: Vector2 = move_targets[i]
 	if target == Vector2.ZERO:
@@ -579,9 +612,8 @@ func move_player(i: int, delta: float, direction: Vector2) -> void:
 		target = move_targets[i]
 		if target == Vector2.ZERO:
 			return
-	var speed: float = SPEED * (LILY_BASE_SPEED_MULTIPLIER if wall_mode == "pond" else 1.0) * (1.0 + players[i].speed_bonus)
-	if terrain[tile_at(players[i].pos).y][tile_at(players[i].pos).x] == 1:
-		speed *= WATER_SPEED_MULTIPLIER
+	var tile := tile_at(players[i].pos)
+	var speed := movement_speed_for(wall_mode, terrain[tile.y][tile.x], players[i].speed_bonus)
 	var travel_direction := Vector2i(int(sign(target.x - players[i].pos.x)), int(sign(target.y - players[i].pos.y)))
 	players[i].pos = players[i].pos.move_toward(target, speed * delta)
 	update_safe_bomb(i)
@@ -672,37 +704,16 @@ func update_bombs(delta: float) -> void:
 			continue
 		bombs.erase(bomb)
 		emit_event("bomb_exploded", {"tile": tile_array(bomb.tile), "owner": bomb.owner, "danger": bomb.get("danger", false)})
-		if bomb.get("danger", false):
-			for x in range(WIDTH):
-				var row_tile := Vector2i(x, bomb.tile.y)
-				blast_cell(row_tile, -1, absi(x - bomb.tile.x), queue)
+		var danger: bool = bomb.get("danger", false)
+		for tile in blast_tiles(board, bomb.tile, bomb.range, danger, crates_at_start):
+			var distance: int = absi(tile.x - bomb.tile.x) + absi(tile.y - bomb.tile.y)
+			blast_cell(tile, -1 if danger else bomb.owner, distance, queue)
+			if danger:
 				flames.back().source = "danger_bomb"
-				if board[row_tile.y][row_tile.x] == CRATE:
-					board[row_tile.y][row_tile.x] = OPEN
-					destroyed_crates.append(row_tile)
-			for y in range(HEIGHT):
-				if y == bomb.tile.y:
-					continue
-				var column_tile := Vector2i(bomb.tile.x, y)
-				blast_cell(column_tile, -1, absi(y - bomb.tile.y), queue)
-				flames.back().source = "danger_bomb"
-				if board[column_tile.y][column_tile.x] == CRATE:
-					board[column_tile.y][column_tile.x] = OPEN
-					destroyed_crates.append(column_tile)
-			continue
-		blast_cell(bomb.tile, bomb.owner, 0, queue)
-		for direction in DIRECTIONS:
-			for distance in range(1, bomb.range + 1):
-				var tile: Vector2i = bomb.tile + direction * distance
-				if not inside(tile) or board[tile.y][tile.x] == WALL:
-					break
-				var hit_crate: bool = crates_at_start.has(tile)
-				blast_cell(tile, bomb.owner, distance, queue)
-				if hit_crate:
-					if board[tile.y][tile.x] == CRATE:
-						board[tile.y][tile.x] = OPEN
-						destroyed_crates.append(tile)
-					break
+			if board[tile.y][tile.x] == CRATE and (danger or (tile != bomb.tile and crates_at_start.has(tile))):
+				board[tile.y][tile.x] = OPEN
+				destroyed_crates.append(tile)
+
 	for tile in destroyed_crates:
 		if rng.randf() < 0.2:
 			var kinds := [PICKUP_BOMB_CAPACITY, PICKUP_BLAST_RANGE]
